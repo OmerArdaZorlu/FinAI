@@ -2,7 +2,7 @@
 
 > **Proje:** ABD hisse senedi piyasaları (başlangıç: `AAPL`, `SPY`) için uçtan uca, canlı, kurumsal standartta algoritmik al-sat sistemi
 > **Ekip:** 4 kişi — Bilgisayar Mühendisliği (Sistem Mimarı / Lead), Elektrik-Elektronik Mühendisliği, İktisat, Metalurji & Malzeme Mühendisliği
-> **Doküman durumu:** Kesinleşmiş mimari kararlar (baseline)
+> **Doküman durumu:** 🟡 TASLAK — ekipçe tartışılmadı, hiçbir madde kesinleşmedi
 > **Son güncelleme:** 2026-09-03
 > **İlgili dokümanlar:** [ENVIRONMENTS.md](ENVIRONMENTS.md) (ortam ayrımı & terfi kapıları) · [TECH_DEBT.md](TECH_DEBT.md) (açık teknik borç) · [README.md](README.md) (indeks)
 
