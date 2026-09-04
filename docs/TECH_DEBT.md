@@ -14,7 +14,6 @@
 | **Önem** | 🔴 P0 = üretime çıkışı engeller · 🟠 P1 = ilk kaza buradan çıkar · 🟡 P2 = süreçsel, şimdi ucuz |
 | **Ortam** | Maddenin **çözüleceği/kanıtlanacağı** ortam (bkz. [ENVIRONMENTS.md](ENVIRONMENTS.md)) |
 | **Kapı** | Hangi terfi kapısını bloke ediyor — `G1` (Araştırma➜Beta) veya `G2` (Beta➜Üretim) |
-| **Sahip** | CS = CS Lead · EEE = Elektrik-Elektronik · ECON = İktisat · MET = Metalurji |
 | **Durum** | `⬜ Açık` · `🟨 Devam` · `✅ Kapalı` |
 
 ---
@@ -28,8 +27,30 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 | **AK-1** | **Bar frekansı: günlük mü, saatlik mi?** | `features.py` lookback pencereleri, hedef ufku, TD-03, TD-04 (PDT), veri maliyeti, işlem maliyeti | ⬜ Açık |
 | **AK-2** | **Broker: Alpaca mı, IBKR mı?** | TD-18, TD-19, transfer maliyeti, ileride AB piyasası erişimi | ⬜ Açık |
 | **AK-3** | **Veri feed'i: IEX mi, 15 dk gecikmeli SIP mi, ücretli anlık SIP mi?** | TD-01 (train/serve skew), hacim feature'ı, aylık maliyet | ⬜ Açık |
+| **AK-4** | **Çalıştırma mimarisi: tek konteyner mi, birden çok mu?** | Dağıtım karmaşıklığı, SQLite yazar sayısı, pozisyon durumunun sahipliği, izleme | ⬜ Açık |
 
 **AK-1 notu:** Günlük bar tek başına dört sorunu birden çözüyor — PDT sınırı (TD-04), T+1 takas kilidi, veri maliyeti (AK-3) ve transfer/işlem ücretlerinin amortismanı. Saatlik kalınırsa dördü de ayrı ayrı çözülmek zorunda.
+
+**AK-4 notu:** Canlıda konteyner kullanılacağı kabul ediliyor; tartışma **kaça bölüneceği**.
+
+*Tek konteyner lehine:* Günlük barda sistem günde bir kez, birkaç saniye çalışır. Bölmek üç yeni problem doğurur — (a) SQLite tek yazar sever, çok yazarlı erişimde kilitlenme olur; (b) parçalar arası tetikleme/sıralama mekanizması gerekir; (c) pozisyon durumunun tek ve net bir sahibi olması gerekir — kesirli hissede koruyucu stop kod tarafında durduğu için (TD-19) bu kritik.
+
+*Bölme lehine:* Bir bileşen çökerse diğerleri ayakta kalır; ayrı güncellenebilir; kaynak izolasyonu sağlar.
+
+*Orta yol:* Yazan bileşen tek konteynerde, **okuma amaçlı izleme/rapor bileşeni ayrı** konteynerde. İzleme çökse işlem tarafı etkilenmez.
+
+```text
+┌─────────────────────────────┐
+│ trader        (tek yazar)   │  veri → model → risk → emir → DB
+└──────────┬──────────────────┘
+           │  DB (tek yazar, çok okuyucu)
+           ▼
+┌─────────────────────────────┐
+│ monitor       (sadece okur) │  grafik, günlük rapor, alarm
+└─────────────────────────────┘
+```
+
+*Frekans bağımlılığı:* AK-1'de saatlik/dakikalık seçilirse tablo değişir — sürekli bağlantı tutan veri toplayıcıyı ayırmak o zaman gerçekten anlamlı olur, çünkü yaşam döngüleri farklılaşır.
 
 **AK-3 notu:** Alpaca'nın **ücretsiz** planı, sorgu bitişi 15 dakikadan eskiyse **tam SIP (konsolide) geçmiş veriyi** veriyor (`feed=sip`). Yalnızca son 15 dakika IEX ile sınırlı. Günlük bar stratejisinde bu fiilen kısıt değil: kapanıştan 15 dk sonra tam bar alınır, emir ertesi açılışa verilir → **aylık $0** ve eğitim/canlı arasında feed tutarlılığı. Saatlik stratejide her sinyal 15 dk geç kalır; anlık SIP $99/ay.
 
@@ -37,27 +58,27 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 
 ## Özet Tablo
 
-| ID | Başlık | Önem | Ortam | Kapı | Sahip | Durum |
-|---|---|---|---|---|---|---|
-| [TD-01](#td-01--trainserve-skew--veri-üretim-hattı-ayrışması) | Train/serve skew — veri üretim hattı ayrışması | 🔴 P0 | A + B | G1, G2 | CS | ⬜ |
-| [TD-02](#td-02--doğrulama-metodolojisi-purged-walk-forward-cv) | Doğrulama metodolojisi (purged walk-forward CV) | 🔴 P0 | A | G1 | CS + ECON | ⬜ |
-| [TD-03](#td-03--hedef-y-tanımı-ve-etiketleme-şeması) | Hedef (y) tanımı ve etiketleme şeması | 🔴 P0 | A | G1 | ECON + CS | ⬜ |
-| [TD-04](#td-04--pdt-pattern-day-trader-kuralı) | PDT (Pattern Day Trader) kuralı | 🔴 P0 | B | G2 | ECON + EEE | ⬜ |
-| [TD-05](#td-05--api-anahtarları-repoda--secret-yönetimi) | API anahtarları repoda — secret yönetimi | 🔴 P0 | Tümü | G2 | CS | ⬜ |
-| [TD-06](#td-06--restart--pozisyon-reconciliation-yok) | Restart & pozisyon reconciliation yok | 🟠 P1 | B | G2 | EEE | ⬜ |
-| [TD-07](#td-07--emir-idempotencyi-yok-çift-emir-riski) | Emir idempotency'si yok (çift emir riski) | 🟠 P1 | B | G2 | EEE | ⬜ |
-| [TD-08](#td-08--bayat-veri-stale-feed-koruması-yok) | Bayat veri (stale feed) koruması yok | 🟠 P1 | B | G2 | EEE | ⬜ |
-| [TD-09](#td-09--global-devre-kesici-kill-switch-yok) | Global devre kesici (kill switch) yok | 🟠 P1 | B | G2 | CS + EEE | ⬜ |
-| [TD-10](#td-10--paper-trading-aşaması-mimaride-yok) | Paper trading aşaması mimaride yok | 🟠 P1 | B | G2 | CS | ⬜ |
-| [TD-11](#td-11--işlem-maliyeti-modeli-yok) | İşlem maliyeti modeli yok | 🟠 P1 | A + B | G1 | ECON + MET | ⬜ |
-| [TD-12](#td-12--örneklem-boyutu-vs-model-kapasitesi) | Örneklem boyutu vs model kapasitesi | 🟠 P1 | A | G1 | CS + ECON | ⬜ |
-| [TD-13](#td-13--featurespy-iki-repoya-çatallanacak) | `features.py` iki repoya çatallanacak | 🟡 P2 | A | G1 | CS | ⬜ |
-| [TD-14](#td-14--çoklu-test--p-hacking-kontrolsüz) | Çoklu test / p-hacking kontrolsüz | 🟡 P2 | A | G1 | ECON + MET | ⬜ |
-| [TD-15](#td-15--model-artifactı-şemasını-taşımıyor) | Model artifact'i şemasını taşımıyor | 🟡 P2 | A + B | G1 | CS | ⬜ |
-| [TD-16](#td-16--indikatör-kütüphanesi-ikiliği) | İndikatör kütüphanesi ikiliği | 🟡 P2 | A | G1 | EEE | ⬜ |
-| [TD-17](#td-17--saat-dilimi--dst-belirsizliği) | Saat dilimi & DST belirsizliği | 🟡 P2 | A + B | G2 | EEE | ⬜ |
-| [TD-18](#td-18--broker-seçimi-kesinleşmedi-alpaca-vs-ibkr) | Broker seçimi kesinleşmedi (Alpaca vs IBKR) | 🟠 P1 | B | G2 | CS + ECON | ⬜ |
-| [TD-19](#td-19--kesirli-hissede-brokerda-koruyucu-stop-kurulamıyor) | Kesirli hissede broker'da koruyucu stop kurulamıyor | 🟠 P1 | B | G2 | EEE | ⬜ |
+| ID | Başlık | Önem | Ortam | Kapı | Durum |
+|---|---|---|---|---|---|
+| [TD-01](#td-01--trainserve-skew--veri-üretim-hattı-ayrışması) | Train/serve skew — veri üretim hattı ayrışması | 🔴 P0 | A + B | G1, G2 | ⬜ |
+| [TD-02](#td-02--doğrulama-metodolojisi-purged-walk-forward-cv) | Doğrulama metodolojisi (purged walk-forward CV) | 🔴 P0 | A | G1 | ⬜ |
+| [TD-03](#td-03--hedef-y-tanımı-ve-etiketleme-şeması) | Hedef (y) tanımı ve etiketleme şeması | 🔴 P0 | A | G1 | ⬜ |
+| [TD-04](#td-04--pdt-pattern-day-trader-kuralı) | PDT (Pattern Day Trader) kuralı | 🔴 P0 | B | G2 | ⬜ |
+| [TD-05](#td-05--api-anahtarları-repoda--secret-yönetimi) | API anahtarları repoda — secret yönetimi | 🔴 P0 | Tümü | G2 | ⬜ |
+| [TD-06](#td-06--restart--pozisyon-reconciliation-yok) | Restart & pozisyon reconciliation yok | 🟠 P1 | B | G2 | ⬜ |
+| [TD-07](#td-07--emir-idempotencyi-yok-çift-emir-riski) | Emir idempotency'si yok (çift emir riski) | 🟠 P1 | B | G2 | ⬜ |
+| [TD-08](#td-08--bayat-veri-stale-feed-koruması-yok) | Bayat veri (stale feed) koruması yok | 🟠 P1 | B | G2 | ⬜ |
+| [TD-09](#td-09--global-devre-kesici-kill-switch-yok) | Global devre kesici (kill switch) yok | 🟠 P1 | B | G2 | ⬜ |
+| [TD-10](#td-10--paper-trading-aşaması-mimaride-yok) | Paper trading aşaması mimaride yok | 🟠 P1 | B | G2 | ⬜ |
+| [TD-11](#td-11--işlem-maliyeti-modeli-yok) | İşlem maliyeti modeli yok | 🟠 P1 | A + B | G1 | ⬜ |
+| [TD-12](#td-12--örneklem-boyutu-vs-model-kapasitesi) | Örneklem boyutu vs model kapasitesi | 🟠 P1 | A | G1 | ⬜ |
+| [TD-13](#td-13--featurespy-iki-repoya-çatallanacak) | `features.py` iki repoya çatallanacak | 🟡 P2 | A | G1 | ⬜ |
+| [TD-14](#td-14--çoklu-test--p-hacking-kontrolsüz) | Çoklu test / p-hacking kontrolsüz | 🟡 P2 | A | G1 | ⬜ |
+| [TD-15](#td-15--model-artifactı-şemasını-taşımıyor) | Model artifact'i şemasını taşımıyor | 🟡 P2 | A + B | G1 | ⬜ |
+| [TD-16](#td-16--indikatör-kütüphanesi-ikiliği) | İndikatör kütüphanesi ikiliği | 🟡 P2 | A | G1 | ⬜ |
+| [TD-17](#td-17--saat-dilimi--dst-belirsizliği) | Saat dilimi & DST belirsizliği | 🟡 P2 | A + B | G2 | ⬜ |
+| [TD-18](#td-18--broker-seçimi-kesinleşmedi-alpaca-vs-ibkr) | Broker seçimi kesinleşmedi (Alpaca vs IBKR) | 🟠 P1 | B | G2 | ⬜ |
+| [TD-19](#td-19--kesirli-hissede-brokerda-koruyucu-stop-kurulamıyor) | Kesirli hissede broker'da koruyucu stop kurulamıyor | 🟠 P1 | B | G2 | ⬜ |
 
 **Dağılım:** 🔴 5 · 🟠 9 · 🟡 5 — toplam **19 madde**
 
@@ -66,7 +87,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ## 🔴 P0 — Üretime Çıkışı Engelleyenler
 
 ### TD-01 — Train/serve skew — veri üretim hattı ayrışması
-**Önem:** 🔴 P0 · **Ortam:** ENV-A + ENV-B · **Kapı:** G1, G2 · **Sahip:** CS · **Durum:** ⬜ Açık
+**Önem:** 🔴 P0 · **Ortam:** ENV-A + ENV-B · **Kapı:** G1, G2 · **Durum:** ⬜ Açık
 
 **Sorun.** `features.py`'ı paylaşmak *hesabı* aynı yapar, *girdiyi* aynı yapmaz. Eğitimde `data/` altındaki Alpaca REST CSV'si var, canlıda LEAN Slice'ından gelen bar var. Ayrışma noktaları:
 - **Split/temettü düzeltmesi:** LEAN varsayılan olarak *adjusted*, Alpaca REST varsayılan `raw` fiyat verir. AAPL'ın split geçmişi log-return serisini eğitimde bozar, canlıda bozmaz.
@@ -90,7 +111,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-02 — Doğrulama metodolojisi (purged walk-forward CV)
-**Önem:** 🔴 P0 · **Ortam:** ENV-A · **Kapı:** G1 · **Sahip:** CS + ECON · **Durum:** ⬜ Açık
+**Önem:** 🔴 P0 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
 
 **Sorun.** Mimaride "XGBoost eğitilir" yazıyor ama cross-validation şeması tanımsız. Finansal zaman serisinde rastgele K-fold = garantili sızıntı. Dahası: `shift(-n)` olmasa bile, feature'ların lookback penceresi (20 barlık SMA, ATR) train/test sınırını aşarak sızıntı üretir.
 
@@ -108,7 +129,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-03 — Hedef (y) tanımı ve etiketleme şeması
-**Önem:** 🔴 P0 · **Ortam:** ENV-A · **Kapı:** G1 · **Sahip:** ECON + CS · **Durum:** ⬜ Açık
+**Önem:** 🔴 P0 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
 
 **Sorun.** Mimari feature tarafını ayrıntılı tanımlıyor ama **hedef değişkeni hiç tanımlamıyor.** Belirsiz kalanlar: tahmin ufku (kaç bar sonrası?), etiketleme yöntemi (sabit ufuk / triple-barrier), sınıf dengesizliği, ve `predict_proba` çıktısının hangi eşikte işleme dönüşeceği.
 
@@ -127,7 +148,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-04 — PDT (Pattern Day Trader) kuralı
-**Önem:** 🔴 P0 · **Ortam:** ENV-B · **Kapı:** G2 · **Sahip:** ECON + EEE · **Durum:** ⬜ Açık
+**Önem:** 🔴 P0 · **Ortam:** ENV-B · **Kapı:** G2 · **Durum:** ⬜ Açık
 
 **Sorun.** Hesap özkaynağı **$25.000 altındaysa**, 5 iş günü içinde 3'ten fazla gün-içi al-sat (aynı gün aç-kapa) yapılamaz. Aşılırsa hesap **90 gün** kısıtlanır. Saatlik sinyal üreten bir sistem bu limiti ilk haftada tüketir.
 
@@ -152,7 +173,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-05 — API anahtarları repoda — secret yönetimi
-**Önem:** 🔴 P0 · **Ortam:** Tüm ortamlar · **Kapı:** G2 · **Sahip:** CS · **Durum:** ⬜ Açık
+**Önem:** 🔴 P0 · **Ortam:** Tüm ortamlar · **Kapı:** G2 · **Durum:** ⬜ Açık
 
 **Sorun.** Mimari şemasında `config/config.json` "Alpaca API anahtarları" içeriyor ve repo kökünde duruyor. Private repo olsa bile 4 kişilik ekipte bu, **sızmış anahtar** demektir; git geçmişinden silmek de ayrı bir acıdır.
 
@@ -172,7 +193,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ## 🟠 P1 — İlk Kaza Buradan Çıkar
 
 ### TD-06 — Restart & pozisyon reconciliation yok
-**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Sahip:** EEE · **Durum:** ⬜ Açık
+**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Durum:** ⬜ Açık
 
 **Sorun.** Konteyner pozisyon açıkken yeniden başlarsa: (a) 100 barlık rolling window boştur, (b) sistem kendi açık pozisyonundan habersizdir. İkisi de sessizce yanlış davranışa yol açar.
 
@@ -188,7 +209,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-07 — Emir idempotency'si yok (çift emir riski)
-**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Sahip:** EEE · **Durum:** ⬜ Açık
+**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Durum:** ⬜ Açık
 
 **Sorun.** HTTP timeout veya WebSocket yeniden bağlanmasında aynı emir iki kez gönderilebilir. Sonuç: hedeflenenin iki katı pozisyon, yani iki katı risk.
 
@@ -203,7 +224,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-08 — Bayat veri (stale feed) koruması yok
-**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Sahip:** EEE · **Durum:** ⬜ Açık
+**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Durum:** ⬜ Açık
 
 **Sorun.** Feed durursa LEAN son barı tutmaya devam eder; model eski veriyle işlem açar. Piyasa hareket etmişken siz geçmişe bakarak alım yaparsınız.
 
@@ -219,7 +240,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-09 — Global devre kesici (kill switch) yok
-**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Sahip:** CS + EEE · **Durum:** ⬜ Açık
+**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Durum:** ⬜ Açık
 
 **Sorun.** Şu an yalnızca işlem-başına %1 risk var. Portföy seviyesinde hiçbir fren yok. Model bozulduğunda (veri değişimi, rejim kırılması, bug) sistemi durduracak mekanizma yok.
 
@@ -237,23 +258,23 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-10 — Paper trading aşaması mimaride yok
-**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Sahip:** CS · **Durum:** ⬜ Açık
+**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Durum:** ⬜ Açık
 
 **Sorun.** Orijinal mimaride backtest'ten doğrudan canlıya geçiliyordu. Paper aşamasının asıl amacı P&L görmek değil: **paper fill'leri ile backtest fill'lerini karşılaştırıp backtest'in ne kadar iyimser olduğunu ölçmek.**
 
 **Çözüm.** ENV-B ortamı olarak mimariye eklendi (bkz. [ENVIRONMENTS.md §3](ENVIRONMENTS.md#3-env-b--local-beta-testnet--beta)). Bu madde, aşamanın **tamamlanmasını** takip eder.
 
 **DoD.**
-- [ ] Minimum 4–6 hafta kesintisiz ENV-B çalışması tamamlandı
+- [ ] Kararlaştırılan süre boyunca kesintisiz ENV-B çalışması tamamlandı
 - [ ] Paper fill fiyatları ile backtest fill fiyatları karşılaştırma raporu üretildi
 - [ ] Sapma backtest varsayımının içinde kaldı; kalmadıysa varsayım güncellendi ve backtest yenilendi
-- [ ] Aynı dönemin paper P&L'i ile backtest P&L'i yan yana raporlandı (MET tarafından QC edildi)
+- [ ] Aynı dönemin paper P&L'i ile backtest P&L'i yan yana raporlandı (QC edildi)
 - [ ] Kapı G2 kontrol listesindeki tüm tatbikatlar bu süre içinde yapıldı
 
 ---
 
 ### TD-11 — İşlem maliyeti modeli yok
-**Önem:** 🟠 P1 · **Ortam:** ENV-A + ENV-B · **Kapı:** G1 · **Sahip:** ECON + MET · **Durum:** ⬜ Açık
+**Önem:** 🟠 P1 · **Ortam:** ENV-A + ENV-B · **Kapı:** G1 · **Durum:** ⬜ Açık
 
 **Sorun.** Alpaca komisyonsuz ama **spread, slippage ve SEC/TAF ücretleri** var. Backtest bunları içermiyorsa, saatlik frekanslı bir stratejide kâğıt üstündeki tüm edge maliyetin altında kalabilir.
 
@@ -262,7 +283,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 **DoD.**
 - [ ] Maliyet modeli yazılı: spread varsayımı, slippage varsayımı, düzenleyici ücretler
 - [ ] Backtest çıktısı hem maliyet dahil hem hariç P&L üretiyor
-- [ ] Metalurjist QC listesine "maliyet dahil/hariç net P&L farkı" eklendi
+- [ ] QC listesine "maliyet dahil/hariç net P&L farkı" eklendi
 - [ ] Strateji maliyet dahil hâlâ pozitif (değilse G1 geçilmez)
 - [ ] Varsayımlar ENV-B'de ölçülen gerçek slippage ile karşılaştırıldı (TD-10 ile bağlantılı)
 - [ ] Duyarlılık analizi: slippage 2x olsa strateji hâlâ pozitif mi?
@@ -270,7 +291,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-12 — Örneklem boyutu vs model kapasitesi
-**Önem:** 🟠 P1 · **Ortam:** ENV-A · **Kapı:** G1 · **Sahip:** CS + ECON · **Durum:** ⬜ Açık
+**Önem:** 🟠 P1 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
 
 **Sorun.** Saatlik barla AAPL'da yılda ~1.750 örnek; 5 yıl ≈ 8.750 satır, ~6 feature, ve çok düşük sinyal/gürültü oranı. XGBoost bu boyutta ezberlemeye fazlasıyla yatkın.
 
@@ -288,7 +309,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-18 — Broker seçimi kesinleşmedi (Alpaca vs IBKR)
-**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Sahip:** CS + ECON · **Durum:** ⬜ Açık · **Karar:** AK-2
+**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Durum:** ⬜ Açık · **Karar:** AK-2
 
 **Sorun.** Mimari Alpaca varsayıyor. Ama küçük hesapta para giriş/çıkış maliyeti Alpaca'da ciddi, IBKR'de neredeyse yok. Karar verilmeden ENV-C'ye çıkılamaz: broker seçimi hem maliyeti, hem TD-19'u, hem de ileride AB piyasası erişimini belirliyor.
 
@@ -319,7 +340,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 ---
 
 ### TD-19 — Kesirli hissede broker'da koruyucu stop kurulamıyor
-**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Sahip:** EEE · **Durum:** ⬜ Açık
+**Önem:** 🟠 P1 · **Ortam:** ENV-B · **Kapı:** G2 · **Durum:** ⬜ Açık
 
 **Sorun.** Küçük hesapta AAPL gibi yüksek fiyatlı bir hisseyi tam adet almak mümkün değil, kesirli (fractional) almak gerekiyor. Ama Alpaca'da kesirli emirlerde:
 - `time_in_force = DAY` zorunlu (GTC yok)
@@ -346,7 +367,7 @@ Sonucu şu: **süreç ölürse koruma da ölür.** Borsada sizi bekleyen hiçbir
 ## 🟡 P2 — Süreçsel, Şimdi Ucuz Sonra Pahalı
 
 ### TD-13 — `features.py` iki repoya çatallanacak
-**Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Sahip:** CS · **Durum:** ⬜ Açık
+**Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
 
 **Sorun.** `features.py` `trading-core`'da yaşıyor ama araştırmacılar `trading-research` notebook'larında ona ihtiyaç duyacak → kopyalayacaklar → sessizce ayrışacak. Bu, **train/serve skew'in ikinci kapısı** (bkz. TD-01).
 
@@ -361,7 +382,7 @@ Sonucu şu: **süreç ölürse koruma da ölür.** Borsada sizi bekleyen hiçbir
 ---
 
 ### TD-14 — Çoklu test / p-hacking kontrolsüz
-**Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Sahip:** ECON + MET · **Durum:** ⬜ Açık
+**Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
 
 **Sorun.** "Tam konsensüs" kuralı kimin onayladığını kaydediyor ama **kaç hipotez denendiğini** kaydetmiyor. 40 hipotez deneyip en iyi 3'ünü seçerseniz, o 3'ünün backtest Sharpe'ı istatistiksel olarak anlamsızdır — ve bunu fark etmenin tek yolu deneme sayısını bilmektir.
 
@@ -372,12 +393,12 @@ Sonucu şu: **süreç ölürse koruma da ölür.** Borsada sizi bekleyen hiçbir
 - [ ] Başarısız hipotezler de repoda kalıyor, silinmiyor
 - [ ] Toplam deneme sayısı sayılabilir durumda
 - [ ] Deflated / haircut Sharpe hesabı deneme sayısını girdi olarak kullanıyor
-- [ ] MET'in QC raporunda "bu sonuç kaç denemenin en iyisi?" satırı var
+- [ ] QC raporunda "bu sonuç kaç denemenin en iyisi?" satırı var
 
 ---
 
 ### TD-15 — Model artifact'i şemasını taşımıyor
-**Önem:** 🟡 P2 · **Ortam:** ENV-A + ENV-B · **Kapı:** G1 · **Sahip:** CS · **Durum:** ⬜ Açık
+**Önem:** 🟡 P2 · **Ortam:** ENV-A + ENV-B · **Kapı:** G1 · **Durum:** ⬜ Açık
 
 **Sorun.** `model.json` tek başına "hangi feature'lar, hangi sırayla" bilgisini garanti etmiyor. Feature sırası sessizce kayarsa model çalışmaya devam eder — sadece anlamsız tahminler üretir. Bulunması en zor hata türü.
 
@@ -392,7 +413,7 @@ Sonucu şu: **süreç ölürse koruma da ölür.** Borsada sizi bekleyen hiçbir
 ---
 
 ### TD-16 — İndikatör kütüphanesi ikiliği
-**Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Sahip:** EEE · **Durum:** ⬜ Açık
+**Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
 
 **Sorun.** LEAN'in kendi native indikatörleri (RSI, ATR, BB) var, biz Pandas-TA kullanıyoruz. İkisi karışırsa farklı sayılar üretir — örneğin Wilder smoothing ile SMA farkı. Warmup'ı native indikatörle, feature'ları pandas-ta ile yapmak sessiz bir tutarsızlık kaynağıdır.
 
@@ -407,7 +428,7 @@ Sonucu şu: **süreç ölürse koruma da ölür.** Borsada sizi bekleyen hiçbir
 ---
 
 ### TD-17 — Saat dilimi & DST belirsizliği
-**Önem:** 🟡 P2 · **Ortam:** ENV-A + ENV-B · **Kapı:** G2 · **Sahip:** EEE · **Durum:** ⬜ Açık
+**Önem:** 🟡 P2 · **Ortam:** ENV-A + ENV-B · **Kapı:** G2 · **Durum:** ⬜ Açık
 
 **Sorun.** Mimaride "saat başında senkronize eder (14:00:00)" yazıyor — UTC mi, America/New_York mı belirsiz. DST yılda iki kez kayar ve o iki günde sistem sessizce yanlış barla çalışır.
 
@@ -434,7 +455,7 @@ Bağımlılıkları gözeterek — bir madde kendinden öncekiler olmadan anlaml
 | **S3** | Model dürüstlüğü — sonuçlara inanabilmek | TD-02, TD-12, TD-14, TD-15 | ENV-A |
 | — | **🚪 Kapı G1** | | ➜ ENV-B |
 | **S4** | Operasyonel dayanıklılık — sistemin ayakta kalması | TD-06, TD-07, TD-08, TD-09, **TD-19** | ENV-B |
-| **S5** | Gerçeklik kontrolü — 4–6 hafta paper + düzenleyici uyum | TD-10, TD-04, **TD-18** | ENV-B |
+| **S5** | Gerçeklik kontrolü — paper çalışma + düzenleyici uyum | TD-10, TD-04, **TD-18** | ENV-B |
 | — | **🚪 Kapı G2** | | ➜ ENV-C |
 
 **Neden bu sıra:** TD-05 (secret) ve TD-13 (paketleme) sonradan yapılırsa geçmişi temizlemek gerekir. TD-01 (parity) çözülmeden TD-02'nin (CV) ürettiği sayılar zaten anlamsızdır. TD-03 (hedef) tanımsızken model eğitmek boşa emektir. Operasyonel maddeler (S4) ancak gerçek bir feed karşısında test edilebildiği için ENV-B'yi bekler.
