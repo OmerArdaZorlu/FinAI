@@ -169,7 +169,7 @@ Açık kararlar verilmeden aşağıdaki kapıların çoğu anlamsızdır:
 
 **Veri ve hesap doğruluğu**
 - [ ] Eğitim verisi ile canlı veri aynı kaynaktan ve aynı ayarlarla geliyor; parity testi yeşil (TD-01)
-- [ ] Özellik hesabı tek kaynakta, sürüm pinli paket olarak import ediliyor; kopya dosya yok (TD-13)
+- [ ] Özellik hesabı tek kaynakta (`src/features.py`); notebook'larda kopyası yok
 - [ ] Gösterge kütüphanesi kararı yazılı, sürümler pinli (TD-16)
 - [ ] Özellikler `shift(-n)` ve NaN denetimlerinden geçmiş
 

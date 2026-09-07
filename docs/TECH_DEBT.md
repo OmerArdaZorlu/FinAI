@@ -72,13 +72,13 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 | [TD-10](#td-10--paper-trading-aşaması-mimaride-yok) | Paper trading aşaması mimaride yok | 🟠 P1 | B | G2 | ⬜ |
 | [TD-11](#td-11--işlem-maliyeti-modeli-yok) | İşlem maliyeti modeli yok | 🟠 P1 | A + B | G1 | ⬜ |
 | [TD-12](#td-12--örneklem-boyutu-vs-model-kapasitesi) | Örneklem boyutu vs model kapasitesi | 🟠 P1 | A | G1 | ⬜ |
-| [TD-13](#td-13--featurespy-iki-repoya-çatallanacak) | `features.py` iki repoya çatallanacak | 🟡 P2 | A | G1 | ⬜ |
 | [TD-14](#td-14--çoklu-test--p-hacking-kontrolsüz) | Çoklu test / p-hacking kontrolsüz | 🟡 P2 | A | G1 | ⬜ |
 | [TD-15](#td-15--model-artifactı-şemasını-taşımıyor) | Model artifact'i şemasını taşımıyor | 🟡 P2 | A + B | G1 | ⬜ |
 | [TD-16](#td-16--indikatör-kütüphanesi-ikiliği) | İndikatör kütüphanesi ikiliği | 🟡 P2 | A | G1 | ⬜ |
 | [TD-17](#td-17--saat-dilimi--dst-belirsizliği) | Saat dilimi & DST belirsizliği | 🟡 P2 | A + B | G2 | ⬜ |
 | [TD-18](#td-18--broker-seçimi-kesinleşmedi-alpaca-vs-ibkr) | Broker seçimi kesinleşmedi (Alpaca vs IBKR) | 🟠 P1 | B | G2 | ⬜ |
 | [TD-19](#td-19--kesirli-hissede-brokerda-koruyucu-stop-kurulamıyor) | Kesirli hissede broker'da koruyucu stop kurulamıyor | 🟠 P1 | B | G2 | ⬜ |
+| [TD-20](#td-20--orkestratör-güvenilirlik-katsayısı-t-sabit-1) | Orkestratör güvenilirlik katsayısı (`t`) sabit 1 | 🟡 P2 | A | G1 | ⬜ |
 
 **Dağılım:** 🔴 5 · 🟠 9 · 🟡 5 — toplam **19 madde**
 
@@ -366,21 +366,6 @@ Sonucu şu: **süreç ölürse koruma da ölür.** Borsada sizi bekleyen hiçbir
 
 ## 🟡 P2 — Süreçsel, Şimdi Ucuz Sonra Pahalı
 
-### TD-13 — `features.py` iki repoya çatallanacak
-**Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
-
-**Sorun.** `features.py` `trading-core`'da yaşıyor ama araştırmacılar `trading-research` notebook'larında ona ihtiyaç duyacak → kopyalayacaklar → sessizce ayrışacak. Bu, **train/serve skew'in ikinci kapısı** (bkz. TD-01).
-
-**Çözüm.** `features`'ı pip ile kurulabilir bir paket yap; research repo'su sürüm pinleyerek import etsin: `pip install git+ssh://...@v0.3.1`.
-
-**DoD.**
-- [ ] `features` paketlenebilir hâle geldi (`pyproject.toml`)
-- [ ] `trading-research` onu sürüm pinli import ediyor; kopya dosya yok
-- [ ] Research repo'sunda `features.py` kopyası bulunmadığını doğrulayan CI kontrolü
-- [ ] Sürüm yükseltme prosedürü yazılı (notebook'lar hangi sürümle çalıştı, kayıtlı)
-
----
-
 ### TD-14 — Çoklu test / p-hacking kontrolsüz
 **Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
 
@@ -443,6 +428,50 @@ Sonucu şu: **süreç ölürse koruma da ölür.** Borsada sizi bekleyen hiçbir
 
 ---
 
+### TD-20 — Orkestratör güvenilirlik katsayısı (`t`) sabit 1
+**Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
+
+**Sorun.** Orkestratörün birleştirme fonksiyonu (ARCHITECTURE.md §7.3):
+
+```text
+S = Σᵢ tᵢ·wᵢ / Σᵢ tᵢ
+```
+
+Burada `tᵢ`, model *i*'nin **güvenilirlik katsayısıdır** — çelişen çıktılar arasında
+hangisini ne kadar ciddiye alacağımızı belirler. Başlangıçta **tüm modeller için
+`t = 1`** kabul edilmiştir; yani her model eşit ciddiyette dinlenir.
+
+Bu bilinçli bir başlangıç tercihi, eksiklik değil: `t = 1` sıfır serbest parametre
+demektir, dolayısıyla aşırı uyum yüzeyi eklemez. Ama kalıcı çözüm değil — gürültülü
+bir model ile isabetli bir model sonsuza kadar eşit ağırlık almamalı.
+
+**Çözüm.** `t`'yi veriden türetmek. Aday şemalar, serbest parametre sayısına göre:
+
+| Şema | `tᵢ` | Serbest parametre | Not |
+|---|---|---|---|
+| Eşit (mevcut) | `1` | 0 | Yenilmesi şaşırtıcı derecede zordur |
+| Ters varyans | `∝ 1/σᵢ²` | 0 | `σᵢ²` **yalnızca out-of-fold** hatalardan; hesaplanır, seçilmez |
+| Stacking | öğrenilir | meta-model kadar | Out-of-fold tahminlerle eğitilmezse sızıntıdır |
+
+**Tam kovaryans çözümü (`t ∝ Σ⁻¹1`) bilinçli olarak kapsam dışı.** Modeller
+korelasyonluyken teorik optimum odur, ama bu örneklem boyutunda kovaryans matrisi
+kötü tahmin edilir ve tersi alınınca hata patlar — eşit ağırlık onu yener
+(bkz. TD-12, örneklem boyutu vs model kapasitesi).
+
+**Yasak.** `t` değerlerini geçmiş sonuçlara bakarak elle oynatmak ("A'ya 0.7,
+B'ye 0.3 verelim"). `t` ya formülle gelir ya usulünce öğrenilir. Elle ayarlanırsa
+her deneme TD-14'ün deneme sayacına yazılmak zorundadır.
+
+**DoD.**
+- [ ] `t` şeması seçildi ve gerekçesi yazıldı (eşit / ters varyans / stacking)
+- [ ] `t`, yalnızca **out-of-fold** tahmin hatalarından hesaplanıyor — in-sample değil
+- [ ] `t` değerleri **kilitli kasa açılmadan önce donduruldu**; kasa sonucuna göre değiştirilmedi
+- [ ] Canlıda `t` güncellenecekse takvimi **önceden ilan edildi** (ör. "her ayın ilk günü, son 250 barın out-of-fold hatasıyla"); sonuca bakıp ad-hoc değişiklik yok
+- [ ] Şema seçimi ve varsa `τ` eşiği TD-14 deneme sayacına işlendi
+- [ ] Tek modelle (N=1) ve çelişen iki modelle (N=2, `w = +1` / `−1` → `S = 0` → BEKLE) davranış testle doğrulandı
+
+---
+
 ## Önerilen Çalışma Sırası
 
 Bağımlılıkları gözeterek — bir madde kendinden öncekiler olmadan anlamlı şekilde kapatılamaz:
@@ -450,12 +479,12 @@ Bağımlılıkları gözeterek — bir madde kendinden öncekiler olmadan anlaml
 | Sprint | Odak | Maddeler | Ortam |
 |---|---|---|---|
 | **S0** | **Açık kararlar** — koda başlamadan verilmeli | AK-1, AK-2, AK-3 | — |
-| **S1** | Temeli doğru at — sonradan değiştirilirse her şey yeniden yapılır | TD-05, TD-13, TD-16, TD-17 | ENV-A |
+| **S1** | Temeli doğru at — sonradan değiştirilirse her şey yeniden yapılır | TD-05, TD-16, TD-17 | ENV-A |
 | **S2** | Veri hattı doğruluğu — modelin altındaki zemin | TD-01, TD-03, TD-11 | ENV-A |
-| **S3** | Model dürüstlüğü — sonuçlara inanabilmek | TD-02, TD-12, TD-14, TD-15 | ENV-A |
+| **S3** | Model dürüstlüğü — sonuçlara inanabilmek | TD-02, TD-12, TD-14, TD-15, TD-20 | ENV-A |
 | — | **🚪 Kapı G1** | | ➜ ENV-B |
 | **S4** | Operasyonel dayanıklılık — sistemin ayakta kalması | TD-06, TD-07, TD-08, TD-09, **TD-19** | ENV-B |
 | **S5** | Gerçeklik kontrolü — paper çalışma + düzenleyici uyum | TD-10, TD-04, **TD-18** | ENV-B |
 | — | **🚪 Kapı G2** | | ➜ ENV-C |
 
-**Neden bu sıra:** TD-05 (secret) ve TD-13 (paketleme) sonradan yapılırsa geçmişi temizlemek gerekir. TD-01 (parity) çözülmeden TD-02'nin (CV) ürettiği sayılar zaten anlamsızdır. TD-03 (hedef) tanımsızken model eğitmek boşa emektir. Operasyonel maddeler (S4) ancak gerçek bir feed karşısında test edilebildiği için ENV-B'yi bekler.
+**Neden bu sıra:** TD-05 (secret) sonradan yapılırsa geçmişi temizlemek gerekir. TD-01 (parity) çözülmeden TD-02'nin (CV) ürettiği sayılar zaten anlamsızdır. TD-03 (hedef) tanımsızken model eğitmek boşa emektir. Operasyonel maddeler (S4) ancak gerçek bir feed karşısında test edilebildiği için ENV-B'yi bekler.

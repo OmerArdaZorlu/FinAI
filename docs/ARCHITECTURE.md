@@ -2,7 +2,7 @@
 
 > **Proje:** ABD hisse senedi piyasaları (başlangıç: `AAPL`, `SPY`) için uçtan uca, canlı, kurumsal standartta algoritmik al-sat sistemi
 > **Doküman durumu:** 🟡 TASLAK — ekipçe tartışılmadı, hiçbir madde kesinleşmedi
-> **Son güncelleme:** 2026-09-03
+> **Son güncelleme:** 2026-09-08
 > **İlgili dokümanlar:** [ENVIRONMENTS.md](ENVIRONMENTS.md) (ortam ayrımı & terfi kapıları) · [TECH_DEBT.md](TECH_DEBT.md) (açık teknik borç) · [README.md](README.md) (indeks)
 
 ---
@@ -12,13 +12,14 @@
 1. [Teknoloji Yığını & Kesin Kısıtlar](#1-teknoloji-yiğini--kesin-kisitlar)
 2. [İç İçe (Nested) Sistem & Dosya Dizin Hiyerarşisi](#2-iç-içe-nested-sistem--dosya-dizin-hiyerarşisi)
 3. [Canlı Veri Akışı — Streaming Mikro-ETL](#3-canli-veri-akişi--streaming-mikro-etl)
-4. [Çift Repo (Dual-Repo) Stratejisi](#4-çift-repo-dual-repo-stratejisi)
+4. [Repo Stratejisi — Tek Private Repo](#4-repo-stratejisi--tek-private-repo)
 5. [İş Akışı — Feature Engineering Loop](#5-iş-akişi--feature-engineering-loop)
 6. [Özellik (Feature) Sözleşmesi](#6-özellik-feature-sözleşmesi)
-7. [Risk Yönetimi Parametreleri](#7-risk-yönetimi-parametreleri)
-8. [CI/CD Kapıları (Quality Gates)](#8-cicd-kapilari-quality-gates)
-9. [Ortam Ayrımı & Açık Teknik Borç](#9-ortam-ayrimi--açik-teknik-borç)
-10. [Uçtan Uca Akış — Hipotezden Canlı Emre](#10-uçtan-uca-akiş--hipotezden-canli-emre)
+7. [Çoklu Hipotez, Model Ayrımı & Orkestratör](#7-çoklu-hipotez-model-ayrimi--orkestratör)
+8. [Risk Yönetimi Parametreleri](#8-risk-yönetimi-parametreleri)
+9. [CI/CD Kapıları (Quality Gates)](#9-cicd-kapilari-quality-gates)
+10. [Ortam Ayrımı & Açık Teknik Borç](#10-ortam-ayrimi--açik-teknik-borç)
+11. [Uçtan Uca Akış — Hipotezden Canlı Emre](#11-uçtan-uca-akiş--hipotezden-canli-emre)
 
 ---
 
@@ -156,14 +157,36 @@ Uygun sinyal oluştuğunda Alpaca REST API üzerinden piyasa/limit emri iletilir
   └───────────────────────────────────────────┘
 ```
 
+## 4. REPO STRATEJİSİ — TEK PRIVATE REPO
+
+**Karar (2026-09-08): Her şey tek bir private repoda tutulur.** Araştırma ve
+üretim kodu ayrı depolara bölünmez; ayrım **klasör düzeyinde** yapılır.
+
 ```text
-  trading-research  (hipotez, notebook, örnek veri)   ── tüm ekip, tam konsensüs
-          │
-          │  istatistiksel olarak anlamlı bulunan hipotez
-          ▼
-  trading-core      (features.py, train.py, model, LEAN, Docker, CI)
-                                                      ── erişimi kısıtlı
+  trading_project/  (tek private repo)
+        │
+        ├── hypotheses/   hipotez kayıt defteri, reddedilenler dahil
+        ├── lab/          notebook'lar, keşif
+        │                 ── CI denetlemez, dağınık olabilir
+        │
+        ├── src/          features.py, train.py, data katmanı
+        ├── tests/        ── CI burayı denetler: sızıntı, NaN, şema
+        └── models/
 ```
+
+**Gerekçe.** Çift repo ayrımının gerekçeleri (yetki ayrımı, patlama yarıçapı,
+farklı değişim hızı) birden fazla kişi varsayar; proje tek geliştiricili.
+Kalan tek gerçek gerekçe olan CI disiplini ise klasör kapsamıyla çözülür:
+CI yalnızca `src/` ve `tests/`'i denetler, `lab/` altını görmez.
+
+Tek repo aynı zamanda `features.py`'ın çatallanma riskini kökten kaldırır —
+notebook doğrudan `from src.features import calculate` der, kopyalanacak bir
+şey yoktur (§6, Değişmez Kural 1).
+
+**Ne zaman bölünür.** Repoya ikinci bir kişi commit atmaya başladığında ve bu
+kişinin canlı emir veren koda push yetkisi olmaması gerektiğinde. O gün
+`features` kurulabilir paket yapılır, araştırma tarafı sürüm pinleyerek import
+eder — kopyalama asla.
 
 ---
 
@@ -206,7 +229,144 @@ Döngü, hipotezden hükme kadar dört adımdan oluşur.
 
 ---
 
-## 8. CI/CD KAPILARI (QUALITY GATES)
+## 7. ÇOKLU HİPOTEZ, MODEL AYRIMI & ORKESTRATÖR
+
+Sistem tek bir hipoteze değil, **birbirinden bağımsız birden çok hipoteze** dayanır.
+Bu bölüm üç soruyu cevaplar: bir hipotez ne zaman ayrı model olur, **çelişen
+çıktılar** nasıl tek emre indirgenir, ve çok deneme yapmanın bedeli nasıl ödenir.
+
+### 7.1 Katman Şeması
+
+```text
+   H-001 modeli  ─┐
+   H-002 modeli  ─┤
+   H-003 modeli  ─┼──► ORKESTRATÖR ──► RİSK ──► EXECUTION ──► LOG
+        ...      ─┤    birleştirme     %1 kasa   Alpaca REST   SQLite
+   H-00N modeli  ─┘    fonksiyonu      trailing SL
+                       tek net sinyal
+```
+
+**Değişmez kural:** Hiçbir model borsa API'sine doğrudan gitmez. Emir yalnızca
+orkestratör → risk zincirinden geçtikten sonra, **tek** bir noktadan çıkar.
+
+### 7.2 Bir Hipotez Ne Zaman Ayrı Model Olur
+
+Bölen çizgi **hedeftir (y)**, fikrin ne kadar farklı hissettirdiği değil:
+
+| Durum | Karar | Gerekçe |
+|---|---|---|
+| Hipotezler **aynı y**'yi paylaşıyor | Tek model, her hipotez bir **sütun** | Bir eğitim tablosunda tek cevap sütunu vardır. Ayrıca ağaç, hipotezler arası **etkileşimi** öğrenir — "kanal dibi VE düşük oynaklık" gibi bileşik şartlar ancak tek modelde temsil edilir. |
+| Hipotezlerin **y'si farklı** (farklı ufuk, meta-etiketleme) | **Ayrı model** | Farklı y = farklı tablo = farklı model. Tercih değil, zorunluluk. |
+
+Karar hipotez **kayıt anında** verilir ve `hypotheses/REGISTRY.md` içinde hedefiyle
+birlikte yazılır; böylece "ayıralım mı" tartışması her seferinde yeniden yapılmaz.
+
+### 7.3 Orkestratör — Birleştirme Fonksiyonu
+
+Orkestratörün çözdüğü problem şudur: **modeller çelişirse hangisini ne kadar
+ciddiye alacağız?** Cevap sözel/ayrık bir kural değil (ör. "hepsi aynı yönü
+söylerse işlem"), **kapalı formda bir fonksiyondur.** Ayrık oylama üç bilgiyi
+birden çöpe atar: sinyalin şiddetini, modelin güvenilirliğini, ve N büyüdükçe
+işlem frekansını sıfıra düşürür.
+
+```text
+             Σᵢ  tᵢ · wᵢ
+    S  =  ─────────────────           S ∈ [-1, +1]
+             Σᵢ  tᵢ  +  ε
+
+              ⎧  AL      S > +τ
+    karar  =  ⎨  SAT     S < −τ
+              ⎩  BEKLE   aksi halde
+```
+
+| Sembol | Anlam | Aralık |
+|---|---|---|
+| `wᵢ` | Model *i*'nin çıktısı — yön **ve** şiddet, işaretli | `[-1, +1]` |
+| `tᵢ` | Model *i*'nin **güvenilirliği** — ne kadar ciddiye alınacağı | `> 0` |
+| `τ` | İşlem eşiği — tek serbest parametre | `[0, 1)` |
+| `ε` | Sıfıra bölmeyi engeller | küçük sabit |
+
+**Neden `w` işaretli:** Alış ve satış taraflarını ayrı büyüklükler olarak tutup
+çıkarmaya gerek yok; işaretli `w` ile çelişen modeller toplamda kendiliğinden
+birbirini götürür. İki model `+1` ve `−1` derse `S = 0` → **BEKLE**. Biri `+1`,
+diğeri `−0.3` derse `S = +0.35` → yön yukarı, şiddet zayıf.
+
+**Neden normalize:** `Σtᵢ`'ye bölünmezse `S` model sayısıyla büyür; 3 modelde
+anlamlı olan `τ`, 6 modelde anlamsız kalır ve her yeni modelde eşiği yeniden
+ayarlamak gerekir — ki bu da §7.4'e göre yeni bir deneme demektir. Normalize
+edilince `τ`, N'den bağımsız kalır.
+
+**Başlangıçta `t = 1` — tüm modeller için.** Yani her model eşit ciddiyette
+dinlenir ve `S`, çıktıların basit ortalaması olur. Bu bilinçli bir tercih:
+sıfır serbest parametre, dolayısıyla aşırı uyum yüzeyi yok. `t`'nin veriden
+nasıl türetileceği açık madde olarak **TECH_DEBT.md TD-20**'de takip edilir.
+
+**Diğer sözleşme maddeleri:**
+
+| | Kural |
+|---|---|
+| **Girdi** | Model `wᵢ` üretir; ham lot/adet **üretmez** — pozisyon boyutu risk katmanının işidir. |
+| **İzolasyon** | Her modele veri salt-okunur (kopya) verilir; biri diğerinin girdisini değiştiremez. |
+| **Belirlenimcilik** | Zaman aşımı, paralel yarış, makine yüküne bağlı davranış **yasak**. Aynı girdi her koşuda aynı `S`'i vermek zorundadır; aksi halde backtest canlıda tekrar edilemez. |
+
+Kod, ikinci model ortaya çıkana kadar yazılmaz; fonksiyon belli olduğu için o
+kısım küçük bir iştir. Tetik şartı: **farklı hedefe sahip ikinci doğrulanmış hipotez.**
+
+### 7.4 Çoklu Deneme Disiplini
+
+Bağımsız modeller birbirini **kirletmez** — ama en iyisini seçmek skoru şişirir.
+Tamamen değersiz 50 strateji denenirse, aralarındaki en iyisi ortalama **~2.1 sigma**
+(p ≈ 0.02) çıkar. Düzeltme yapılmazsa gürültüye "anlamlı" damgası basılır.
+
+Ayrıntılı DoD **TD-14**'te; buradaki özet:
+
+1. **Deneme sayacı — `hypotheses/REGISTRY.md`.** Hipotez test edilmeden **önce**
+   kaydedilir. **Reddedilenler kayıtta kalır**; yalnızca kazananlar kaydedilirse
+   deneme sayısı bilinemez ve düzeltme anlamsızlaşır. Aynı hipotezin farklı
+   frekansta (günlük/saatlik) sınanması **iki deneme** sayılır. `τ` eşiği ve
+   `t` şeması da birer denemedir (TD-20).
+2. **Eşik düzeltmesi.** Bonferroni (α/m) veya Benjamini-Hochberg (FDR).
+   Finans karşılığı: **Deflated Sharpe Ratio**.
+3. **Efektif deneme sayısı (N_eff).** Birbirinin türevi olan hipotezler
+   (RSI-14 / RSI-21) tek deneme sayılır; ceza bağımsız küme sayısı üzerinden
+   kesilir. **Kümeleme sonuçlara bakılmadan**, özellik korelasyonuna göre yapılır —
+   aksi halde cezayı istediğin kadar küçültebileceğin bir kaçış kapısı açılır.
+
+### 7.5 Veri Bölme Politikası
+
+```text
+2016-01 ──────────────────── 2024-06 │embargo│ 2024-07 ──────── 2026-09
+   ARAŞTIRMA ALANI (~%80)                        KİLİTLİ KASA (~%20)
+   walk-forward / purged CV                      tek seferlik
+   hipotez seçimi, pencere seçimi, τ, t          nihai birleşik sistem
+   sınırsız bakılır                              BİR KEZ açılır
+```
+
+- Sınırlar **tek yerde** sabitlenir (`src/splits.py`); her hipotez birebir aynı
+  kesimi kullanır, yoksa sonuçlar karşılaştırılamaz.
+- **Eğitim seti tüm hipotezlerde ortaktır** ve sınırsız kullanılır — performans
+  tahmini oradan alınmadığı için yakılacak bir tarafsızlığı yoktur.
+- **Embargo**, etiket ufku (K bar) kadar; sızıntının tehlikeli yönü özellik
+  penceresi değil **etikettir**.
+- Kasa açıldıktan sonra son doğrulama geçmiş veride değil, **ENV-B paper trading**
+  üzerinde yapılır — kendini her gün yenileyen, hiç bakılmamış gerçek holdout.
+
+Yöntem ayrıntısı TD-02 (purged walk-forward CV) ve TD-12 (örneklem boyutu vs
+model kapasitesi) altında takip edilir.
+
+---
+
+## 8. RİSK YÖNETİMİ PARAMETRELERİ
+
+> ⚠️ **EKSİK BÖLÜM.** Bu başlık içindekiler listesinde vardı ancak gövdesi
+> dokümanda hiç yazılmamış. Doldurulması gereken asgari maddeler: işlem başına
+> kasa riski (%1), pozisyon boyutu formülü, trailing stop parametreleri,
+> günlük/haftalık kayıp limitleri, eşzamanlı açık pozisyon tavanı, kesirli
+> hissede koruyucu stop'un nerede durduğu (bkz. TECH_DEBT.md TD-19).
+
+---
+
+## 9. CI/CD KAPILARI (QUALITY GATES)
 
 GitHub Actions (`.github/workflows/ci.yml`) üzerinde her PR için zorunlu kontroller:
 
@@ -218,11 +378,11 @@ GitHub Actions (`.github/workflows/ci.yml`) üzerinde her PR için zorunlu kontr
 
 ---
 
-## 9. ORTAM AYRIMI & AÇIK TEKNİK BORÇ
+## 10. ORTAM AYRIMI & AÇIK TEKNİK BORÇ
 
 Bu doküman sistemin **hedef mimarisini** tanımlar. Onu tamamlayan iki doküman:
 
-### 9.1 Ortam Ayrımı — [ENVIRONMENTS.md](ENVIRONMENTS.md)
+### 10.1 Ortam Ayrımı — [ENVIRONMENTS.md](ENVIRONMENTS.md)
 
 Yukarıdaki mimari üç ayrı ortamda koşar ve **kod her üçünde de aynıdır**; değişen yalnızca konfigürasyon, sır ve yetkidir:
 
@@ -237,7 +397,7 @@ Yukarıdaki mimari üç ayrı ortamda koşar ve **kod her üçünde de aynıdır
 Terfi kapıları — **G1** (Araştırma ➜ Beta) ve **G2** (Beta ➜ Üretim) — kontrol listeleriyle birlikte [ENVIRONMENTS.md §6](ENVIRONMENTS.md#6-terfi-kapıları-promotion-gates)'da tanımlıdır.
 ---
 
-## 10. UÇTAN UCA AKIŞ — HİPOTEZDEN CANLI EMRE
+## 11. UÇTAN UCA AKIŞ — HİPOTEZDEN CANLI EMRE
 
 > Her kutu bir adım. Ok üstündeki yazı, o adımdan **ne çıktığı**.
 
