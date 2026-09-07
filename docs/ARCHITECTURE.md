@@ -18,6 +18,7 @@
 7. [Risk Yönetimi Parametreleri](#7-risk-yönetimi-parametreleri)
 8. [CI/CD Kapıları (Quality Gates)](#8-cicd-kapilari-quality-gates)
 9. [Ortam Ayrımı & Açık Teknik Borç](#9-ortam-ayrimi--açik-teknik-borç)
+10. [Uçtan Uca Akış — Hipotezden Canlı Emre](#10-uçtan-uca-akiş--hipotezden-canli-emre)
 
 ---
 
@@ -234,3 +235,143 @@ Yukarıdaki mimari üç ayrı ortamda koşar ve **kod her üçünde de aynıdır
 > **Değişmez kural:** AWS'de model eğitilmez, kod düzenlenmez, deney yapılmaz. ENV-C'ye yalnızca etiketli, ENV-B'de kanıtlanmış ve geri alınabilir bir imaj girer.
 
 Terfi kapıları — **G1** (Araştırma ➜ Beta) ve **G2** (Beta ➜ Üretim) — kontrol listeleriyle birlikte [ENVIRONMENTS.md §6](ENVIRONMENTS.md#6-terfi-kapıları-promotion-gates)'da tanımlıdır.
+---
+
+## 10. UÇTAN UCA AKIŞ — HİPOTEZDEN CANLI EMRE
+
+> Her kutu bir adım. Ok üstündeki yazı, o adımdan **ne çıktığı**.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  1  HİPOTEZ                                                                 │
+│                                                                             │
+│     Bir cümle yazılır:                                                      │
+│     "Dünkü oynaklık düşükse, bugün kapanış yukarı gitme olasılığı artar."   │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   │  ÇIKTI: ölçülebilir hale getirilmiş cümle
+                                   │         oynaklık = ATR(14) / Close
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  2  VERİ ÇEKME                                                              │
+│                                                                             │
+│     Alpaca REST  →  AAPL + SPY günlük barları                               │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   │  ÇIKTI: aapl_daily.csv   (dosya)
+                                   │  tarih      | open | high | low | close | volume
+                                   │  2024-01-03 | 184  | 185  | 182 | 184   | 58.4M
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  3  TEST  (Jupyter)                                                         │
+│                                                                             │
+│     Hipotezi TEK BAŞINA ölç:                                                │
+│     ATR/Close düşük olan günleri ayır → ertesi gün ne olmuş, say.           │
+│                                                                             │
+│     düşük oynaklık günleri : %54 yukarı                                     │
+│     diğer günler           : %50 yukarı                                     │
+└───────────────┬──────────────────────────────────────┬──────────────────────┘
+                │                                      │
+       ANLAMSIZ │                                      │ ANLAMLI
+                │                                      │
+                ▼                                      ▼
+        ┌───────────────┐        ┌─────────────────────────────────────────────┐
+        │  ÇÖP          │        │  4  ÖZELLİK OLARAK EKLE                     │
+        │  hipotez      │        │                                             │
+        │  kaydedilir,  │        │     features.py'a yeni bir SÜTUN eklenir:   │
+        │  1'e dönülür  │        │     atr_orani = ATR(14) / Close             │
+        └───────────────┘        └──────────────────┬──────────────────────────┘
+                                                    │
+                                                    │  ÇIKTI: features.py'da 1 sütun daha
+                                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  5  TABLO                                                                   │
+│                                                                             │
+│     Her SATIR = bir gün.  Her SÜTUN = bir hipotez.  Son sütun = CEVAP (y).  │
+│                                                                             │
+│     tarih      | getiri | atr_orani | hacim_oranı | ... |  y                │
+│     2024-01-03 | -0.004 |   0.021   |    1.12     | ... |  1   ← yarın çıktı │
+│     2024-01-04 |  0.011 |   0.019   |    0.87     | ... |  0   ← yarın düştü │
+│                                                                             │
+│     KURAL: y, o satırın GELECEĞİNDEN gelir. Sütunlar ise yalnızca           │
+│            o gün ve öncesinden. Karışırsa sızıntı olur, model yalan söyler. │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   │  ÇIKTI: eğitim tablosu (satır × sütun)
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  6  BÖLME                                                                   │
+│                                                                             │
+│     ZAMANA GÖRE ikiye ayrılır — rastgele DEĞİL.                             │
+│                                                                             │
+│     2016 ─────────────── 2023 │ boşluk │ 2024 ──────── 2025               │
+│           EĞİTİM (model burayı görür)     TEST (hiç görmez)                  │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   │  ÇIKTI: eğitim seti + test seti
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  7  EĞİTİM  —  train.py                                                     │
+│                                                                             │
+│     XGBoost İLE eğitilir:                                                   │
+│     ağaç ekle → hatayı ölç → kalan hataya bir ağaç daha ekle → ...          │
+│     (yüzlerce kez)                                                          │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   │  ÇIKTI: model.json        (eğitilmiş model)
+                                   │         rapor.csv         (test sonucu)
+                                   │         önem tablosu      (hangi sütun işe yaradı)
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  8  KALİTE KONTROL                                                          │
+│                                                                             │
+│     Baseline'ı geçti mi?  (hep "yukarı" desek ne olurdu?)                   │
+│     Maliyet düşünce hâlâ kârlı mı?  Maksimum düşüş katlanılır mı?           │
+└───────────────┬──────────────────────────────────────┬──────────────────────┘
+                │                                      │
+         GEÇMEZ │                                      │ GEÇER
+                │                                      │
+                └──────────► 1'e dön                   ▼
+                             yeni hipotez   ┌──────────────────────────────────┐
+                                            │  9  CANLI                        │
+                                            └──────────────┬───────────────────┘
+                                                           ▼
+```
+
+### Canlı taraf (adım 9'un içi)
+
+```text
+   her işlem günü, kapanıştan sonra bir kez:
+
+   ┌──────────────┐   bugünün barı    ┌──────────────┐   1 satırlık tablo
+   │  VERİ ÇEK    │──────────────────►│ features.py  │──────────────────────┐
+   │  Alpaca REST │                   │  AYNI KOD    │                      │
+   └──────────────┘                   └──────────────┘                      │
+                                       ▲                                    ▼
+                                       │                          ┌──────────────────┐
+                            eğitimde   │                          │   model.json     │
+                            kullanılan │                          │  predict_proba() │
+                            dosyanın   │                          └────────┬─────────┘
+                            AYNISI ────┘                                   │
+                                                                  olasılık │ p = 0.63
+                                                                           ▼
+                                                                 ┌──────────────────┐
+                                                                 │  RİSK KONTROL    │
+                                                                 │  eşiği geçti mi  │
+                                                                 │  kaç lot alınır  │
+                                                                 │  günlük limit    │
+                                                                 └────────┬─────────┘
+                                                                          │ karar
+                                                                          ▼
+                                                                 ┌──────────────────┐
+                                                                 │  EMİR  (Alpaca)  │
+                                                                 └────────┬─────────┘
+                                                                          ▼
+                                                                 ┌──────────────────┐
+                                                                 │  KAYIT (SQLite)  │
+                                                                 └──────────────────┘
+```
+
+> **Tek kritik nokta:** 4. adımdaki `features.py` ile 9. adımdaki `features.py`
+> **aynı dosyadır.** İkisi ayrışırsa model, eğitildiğinden farklı sayılar görür ve
+> canlıdaki davranışı backtest'e hiç benzemez.

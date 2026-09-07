@@ -1,17 +1,19 @@
-
+# --- Sırlar ---
 .env
 config/config.json
 
-
-data/
+# --- Veri ve üretilen çıktılar ---
+# Baştaki '/' kritik: kök dizindeki data/ klasörünü hedefler.
+# Sabitlenmezse desen src/data/ kaynak kodunu da yutar.
+/data/
 *.db
+*.db-wal
+*.db-shm
 *.parquet
+/models/*.json
+/reports/
 
-
-models/*.json
-reports/
-
-
+# --- Python ---
 __pycache__/
 *.py[cod]
 .venv/
@@ -19,7 +21,7 @@ venv/
 .pytest_cache/
 .ipynb_checkpoints/
 
-
+# --- Editör / OS ---
 .vscode/
 .idea/
 Thumbs.db
