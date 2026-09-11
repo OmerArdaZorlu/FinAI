@@ -68,6 +68,19 @@ def regular_hours(df: pd.DataFrame, *, include_open_bar: bool = True) -> pd.Data
     return df.loc[mask].reset_index(drop=True)
 
 
+def regular_minutes(df: pd.DataFrame) -> pd.DataFrame:
+    """Dakikalık (ya da saatten kısa) barlarda düzenli seans: 09:30 ≤ saat < 16:00 ET.
+
+    `regular_hours` saat değerine bakar; dakikalık barda 09:00–09:29 seans
+    öncesini de tutardı. Burada dakika da hesaba katılır. 1Min barlar
+    başlangıç saatiyle etiketli: 09:30 barı ilk, 15:59 barı son düzenli bar.
+    """
+    t = df["timestamp"].dt.tz_convert(EXCHANGE_TZ)
+    dakika = t.dt.hour * 60 + t.dt.minute
+    mask = (dakika >= 9 * 60 + 30) & (dakika < 16 * 60)
+    return df.loc[mask].reset_index(drop=True)
+
+
 def session_report(df: pd.DataFrame) -> pd.DataFrame:
     """Saat bazında bar sayısı ve hacim payı — filtrenin ne kestiğini gösterir."""
     hour = exchange_hour(df)

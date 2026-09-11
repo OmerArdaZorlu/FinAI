@@ -137,3 +137,32 @@ def test_session_profile_colours_by_session():
               for h, b in zip(report.index, bars)}
     assert colors[4] == plots.ALT     # uzatılmış
     assert colors[11] == plots.POS    # düzenli
+
+
+# ----------------------------------------------------- BASELINE FARKI --
+
+def _bakiye_cifti(freq: str, bar: int, bitis: float):
+    """Sabit hızla büyüyen sistem + sabit baseline."""
+    idx = pd.date_range("2019-01-02 14:30", periods=bar, freq=freq, tz="UTC")
+    base = pd.Series(np.ones(bar), index=idx)
+    return base * np.linspace(1.0, bitis, bar), base
+
+
+def test_gap_chart_one_line_per_series():
+    fig = plots.gap_chart({
+        "günlük": _bakiye_cifti("B", 60, 1.10),
+        "saatlik": _bakiye_cifti("h", 300, 1.20),
+    })
+    ax = fig.axes[0]
+    assert len(ax.lines) == 2 + 1              # iki seri + sıfır çizgisi
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == ["günlük", "saatlik"]
+
+
+def test_gap_chart_plots_ratio_minus_one_and_one_point_per_day():
+    sis, base = _bakiye_cifti("h", 240, 1.20)   # 240 saat = 10 gün
+    fig = plots.gap_chart({"saatlik": (sis, base)})
+    x, y = fig.axes[0].lines[1].get_data()      # 0. çizgi axhline(0), 1. seri
+    assert len(y) == len(set(pd.DatetimeIndex(sis.index).tz_convert(
+        "America/New_York").date))
+    assert y[-1] == pytest.approx(float(sis.iloc[-1] / base.iloc[-1] - 1))
+    assert y[0] < y[-1]                         # fark zamanla açılıyor

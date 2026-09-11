@@ -2,6 +2,7 @@
 
 > **Durum:** ✅ şimdilik kabul (kullanıcı kararı, 2026-09-11)
 > **Ana kayıt:** [REGISTRY.md](REGISTRY.md) → H-001-C ve KABUL-1
+> **Defter:** [lab/KABUL-1_AAPL_takip_eden_stop.ipynb](../lab/KABUL-1_AAPL_takip_eden_stop.ipynb) — adım adım, grafikli; diğer hipotezler için şablon
 > **Veri:** AAPL, 2016-01 → 2024-06. 2024-07 sonrası saklanan veri açılmadı.
 
 ---
@@ -97,7 +98,7 @@ değerler denenmedi.
 | Eğitim/test | `lab/backtest.py` → `egitim_test(..., sabit={"cizgi": "donchian", "satis": "takip"})` |
 | Saatlik seans filtresi | `lab/session.py` → `regular_hours()` |
 | Araştırma / kasa bölmesi | `lab/splits.py` → `split_research_vault()` |
-| Defter | `lab/h001_backtest.ipynb` bölüm 8 |
+| Defter | `lab/KABUL-1_AAPL_takip_eden_stop.ipynb` (adım adım), `lab/DENEY_GUNLUGU.ipynb` adım 7-8 |
 
 Tekrar çalıştırmak için:
 
@@ -145,6 +146,14 @@ sonuc = calistir(gunluk, k)
 |---|---|---|---|---|---|---|
 | günlük | **5.80** | 5.63 | 6 yılın 4'ü | 22 | ~4 | %84 |
 | saatlik | **6.29** | 5.61 | 6 yılın 5'i | 38 | ~7 | %88 |
+
+**Ek bilgiler (2026-09-11, defterden, günlük):**
+
+| | değer |
+|---|---|
+| Baseline, kesintisiz (test başında al, sonunda sat; tek maliyet) | **5.66**. Yukarıdaki 5.63, her yıl ayrı alış-satış maliyeti düşüldüğü için biraz düşük. |
+| En büyük erime, test yılları | sistem **%27.6**, baseline %31.4 |
+| İşlemler | 22 işlemin 9'u kazançlı, 13'ü zararlı; işlem başına ortalama +%10.7. Zararlar küçük, kazançlar büyük. |
 
 ### Yıl yıl
 
@@ -224,6 +233,21 @@ kısmından kaçıp dipten yeniden girmekten geliyor.
 - **Takip mesafesi sınırda:** eğitim her yıl denenen en geniş değeri seçti.
   Daha geniş değerlerde sistem giderek al-tut'a dönüşüyor (REGISTRY 6.8).
 - Saklanan veride (2024-07 sonrası) ve sanal hesapta henüz denenmedi.
+
+### Denenip reddedilen değişiklikler
+
+- **Zararına satış dip çizgisinde (2026-09-11):** dibin altında değil, dip
+  çizgisine değince sat. Test yıllarında 1 lira günlük 3.56 (son hali 5.80),
+  saatlik 5.39 (son hali 6.29). İşlem 22 → 90, çoğu küçük zararla kapandı;
+  erime %35. Ayrıntı: REGISTRY 6.9. KABUL-1 değişmedi.
+
+### Başka veride denemeler
+
+- **Dakikalık veri (2026-09-12):** aynı sistem, kararlar her dakika. Test
+  yıllarında 1 lira 6.32 (saatlik 6.29, günlük 5.80, dakikalık baseline 5.57).
+  22 işlem, 6 yılın 5'inde baseline'ı geçti, erime %30.8 (baseline %35.0).
+  Saatlikle neredeyse aynı, belirgin kazanç yok. Ayrıntı: REGISTRY 6.10,
+  defter adım 8b.
 
 ---
 

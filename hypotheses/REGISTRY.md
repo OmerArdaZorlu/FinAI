@@ -22,6 +22,16 @@ Her maddenin bir etiketi var:
 Veri: 2016-01 → 2024-06 (araştırma alanı). 2024-07 → 2026-09 arası saklanan
 veri (kasa) **hiç açılmadı**.
 
+**Defterler:**
+* `lab/DENEY_GUNLUGU.ipynb` — yolculuğun tamamı, sırayla: her adım "ne
+  denedik → sonuç → karar → çıkarım" (2026-09-12).
+* `lab/KABUL-1_AAPL_takip_eden_stop.ipynb` — kabul edilen sistem, adım adım.
+  Başka sistem/sembol için de şablon.
+* Eski defterler (`h001_measure`, `h001_daily`, `h001_hourly`, `h001_backtest`)
+  **2026-09-12'de kullanıcı kararıyla kaldırıldı**; içerikleri yukarıdaki iki
+  deftere toplandı. Sonuçları bu dosyada bölüm 6'da duruyor, defterlerin
+  kendisi git geçmişinde (commit `931355d`).
+
 ---
 
 ## 1. Varlık tipleri ve genel kabuller
@@ -78,7 +88,7 @@ Hepsi SPY ve AAPL, 2016-01 → 2024-06, maliyet her alış ve satışta %0.05.
 | G-2 | **Ezberleme (overfit) görülmedi.** Sistemin eğitimdeki ve testteki yıllık getirisi birbirine yakın (günlük %5.3 / %3.3, saatlik %3.6 / %6.0). Sorun eğitimde değil, sistem eğitim verisinde bile al-tut'un gerisinde. |
 | G-3 | **Aynı riskle bile geride.** Paranın sadece %30'unu SPY'da tutmak 1 lira → 1.45 ve en fazla %11 erime veriyor. Sistem (zamanın %30'unda piyasada) 1.03 ve %31 erime. |
 | G-4 | Çizgi kısaldıkça işlem sayısı artıyor, **maliyet kazancı yiyor**. Çizgi uzadıkça sistem zamanın ~%75'inde nakitte kalıyor. |
-| G-5 | Yükselişte fiyat tepe çizgisine yapışık gidiyor, dibe hiç inmiyor. "Dipte al" kuralı rallinin tamamını kaçırıyor (grafik: defter bölüm 7). |
+| G-5 | Yükselişte fiyat tepe çizgisine yapışık gidiyor, dibe hiç inmiyor. "Dipte al" kuralı rallinin tamamını kaçırıyor (grafik: `DENEY_GUNLUGU.ipynb` adım 6). |
 | G-6 | **Takip eden stop** sonucu belirgin iyileştirdi (SPY eğitim/test 1.06 → 1.78). Ama iyileşme **piyasada daha uzun kalmaktan** geliyor. Takip mesafesi genişledikçe sistem %90-98 piyasada kalıyor ve al-tut'a dönüşüyor. |
 | G-7 | **Düşüşte koruma yok.** 2022'de piyasa %18 düştü, sistemlerin çoğu da o kadar kaybetti. En büyük erime al-tut ile aynı (%35-39). Tek istisna 50 günlük çizgi (2022'de -%0.7), ama aynı sistem 2018'de piyasadan kötü (-%11.7'ye karşı -%5). |
 | G-8 | **Dönem uyarısı.** SPY bu dönemde yılda ~%14 yükseldi, uzun dönem ortalamasının (~%10) üstünde. "Sorun seçilen hissede" sonucu AAPL için olduğu kadar SPY için de geçerli olabilir. Yatay seyreden bir varlıkla henüz karşılaştırılmadı (H-002). |
@@ -97,7 +107,7 @@ Hepsi SPY ve AAPL, 2016-01 → 2024-06, maliyet her alış ve satışta %0.05.
   sadece geçmişe bakarak.
 - **Kriter (önceden yazıldı):** sıra korelasyonu (rho) negatif,
   `p < 0.05 / 6 = 0.00833` ve `|rho| ≥ 0.05`.
-- **Kod:** `lab/h001.py`, `lab/h001_daily.ipynb`, `lab/h001_hourly.ipynb`
+- **Kod:** `lab/h001.py`, `lab/analysis.py`. Defter: `lab/DENEY_GUNLUGU.ipynb` adım 1.
 - **Durum: REDDEDİLDİ** (günlük ve saatlik). İşaret doğru yönde ama etki
   eşiğin altında, büyük kısmı 2020-2021'den geliyor.
 
@@ -107,7 +117,7 @@ Hepsi SPY ve AAPL, 2016-01 → 2024-06, maliyet her alış ve satışta %0.05.
 - **İddia:** Fiyat son N günün en düşüğüne yaklaşınca alıp, en yükseğine
   değince (ya da dibin epey altına inince) satan sistem, al-tut'tan fazla
   kazandırır.
-- **Kod:** `lab/backtest.py`, `lab/h001_backtest.ipynb`
+- **Kod:** `lab/backtest.py`. Defter: `lab/DENEY_GUNLUGU.ipynb` adım 2-6.
 - **Durum: REDDEDİLDİ.** Hiçbir sürüm, tüm dönemde ve eğitim/testte al-tut'u
   geçemedi (sonuçlar bölüm 6'da).
 
@@ -254,7 +264,9 @@ Tüm döneme bakılarak sonucu görülen ayarlar. Eğitim/test içindeki seçiml
 | 2026-09-11 | Uzun çizgiler, günlük (10, 20, 50, 100 gün) | 4 | al-tut'un altında |
 | 2026-09-11 | 4 sürüm × SPY/AAPL × günlük/saatlik | 16 | SPY altında, AAPL tüm dönemde altında |
 | 2026-09-11 | Takip mesafesi tablosu (4 mesafe × 2 çizgi × 2 sembol) | 16 | geniş mesafede al-tut'a dönüşüyor |
-| | **Toplam** | **~71** | |
+| 2026-09-11 | KABUL-1, zararına satış dip çizgisinde (günlük, saatlik) | 2 | KABUL-1'den kötü |
+| 2026-09-12 | KABUL-1, dakikalık veri | 1 | saatlikle neredeyse aynı |
+| | **Toplam** | **~74** | |
 
 **Bu sayının anlamı (ARCHITECTURE.md §7.4):** tamamen değersiz 50 strateji
 denendiğinde, aralarındaki en iyisi şans eseri iyi görünür. ~71 denemeden
@@ -268,7 +280,13 @@ sayılmaz.
 Aksi yazmadıkça: SPY, maliyet her alış ve satışta %0.05, "1 lira →" başlangıçtaki
 1 liranın dönem sonundaki değeri.
 
-### 6.1 H-001 ölçüm: günlük (`lab/h001_daily.ipynb`)
+**"Bölüm N" notu:** başlıklardaki bölüm numaraları, kaldırılan
+`h001_backtest.ipynb` defterinin bölümleridir (git geçmişinde, commit
+`931355d`). Bugünkü karşılıkları `lab/DENEY_GUNLUGU.ipynb` adımlarıdır:
+bölüm 2-3 → adım 2, bölüm 4 → adım 3, bölüm 5 → adım 4, bölüm 6 → adım 5,
+bölüm 7 → adım 6, bölüm 8 → adım 7-8.
+
+### 6.1 H-001 ölçüm: günlük (bugünkü karşılığı: `DENEY_GUNLUGU.ipynb` adım 1)
 
 Baseline: ortalama günlük getiri %0.060, günlerin %51.7'sinde yükseliş.
 
@@ -287,7 +305,7 @@ Baseline: ortalama günlük getiri %0.060, günlerin %51.7'sinde yükseliş.
 Walk-forward katları (N=20): -0.033, -0.087, **-0.146** (tek anlamlı, 2020-06 → 2021-10), -0.007, -0.017.
 Stres: covid çöküşü +0.016, 2022 ayı piyasası -0.023.
 
-### 6.2 H-001 ölçüm: saatlik (`lab/h001_hourly.ipynb`)
+### 6.2 H-001 ölçüm: saatlik (bugünkü karşılığı: `DENEY_GUNLUGU.ipynb` adım 1)
 
 Sadece borsa saatleri. Baseline: 7 bar sonrası ortalama getiri %0.060, %52.4 yükseliş.
 
@@ -306,7 +324,7 @@ Sadece borsa saatleri. Baseline: 7 bar sonrası ortalama getiri %0.060, %52.4 y�
 Walk-forward katları: -0.029, -0.080, **-0.130** (2020-06 → 2021-10), +0.010, -0.007.
 Stres: covid çöküşü +0.058, 2022 ayı piyasası +0.019.
 
-### 6.3 Al-sat, 1 haftalık çizgi (`lab/h001_backtest.ipynb` bölüm 2-3)
+### 6.3 Al-sat, 1 haftalık çizgi (bölüm 2-3 → `DENEY_GUNLUGU.ipynb` adım 2)
 
 Eşikler: alım = dipten kanal genişliğinin %10'u yukarısı, stop = dipten
 genişliğin yarısı aşağısı.
@@ -432,3 +450,90 @@ Eğitim her yıl en geniş takip mesafesini (1.0) seçti.
 | 2.0 | %98 | 3.37 | %98 | 11.22 |
 | 4.0 | %99 | 3.36 | %99 | 10.12 |
 | al-tut | %100 | 3.12 | %100 | 8.94 |
+
+### 6.9 KABUL-1, zararına satış dip çizgisinde (2026-09-11)
+
+Kullanıcının isteği: "şu anda eğriyi biraz aşınca ne yapıyorsa onu eğrinin
+üstüne gelince yapsın." KABUL-1'de alış (dipten %10 yukarı) ve takibe geçiş
+(tepeye değince) zaten çizgide. Çizginin ötesinde olan tek şey zararına satış:
+dibin genişliğin 0.25-2 katı altında. Bu denemede zararına satış **dip
+çizgisinin kendisine** kondu (`stop_payi = 0`), geri kalan her şey KABUL-1 ile
+aynı. Alım ve takip mesafesi yine her yıl eğitimden seçildi.
+
+Nasıl çalıştırıldı: `lab.backtest.STOP_SECENEKLERI = (0.0,)` yapılıp
+`egitim_test_detay(df, n, range(2019, 2025), sabit={"cizgi": "donchian",
+"satis": "takip"})`. Kodda değişiklik yok.
+
+Sadece test yılları (2019 → 2024-06), AAPL:
+
+| | günlük son hali | günlük dipte sat | saatlik son hali | saatlik dipte sat |
+|---|---|---|---|---|
+| 1 lira → | **5.80** | 3.56 | **6.29** | 5.39 |
+| baseline (yıl yıl) | 5.63 | 5.63 | 5.61 | 5.61 |
+| en büyük erime | %27.6 | %35.0 | %30.5 | %35.5 |
+| işlem | 22 | 90 | 38 | 229 |
+| zararına satılan | 4 | 71 | 19 | 213 |
+| kazançlı işlem | 9 | 14 | 14 | 14 |
+| piyasada | %84 | %75 | %88 | %79 |
+
+| test yılı | günlük son hali | günlük dipte sat | saatlik son hali | saatlik dipte sat | baseline |
+|---|---|---|---|---|---|
+| 2019 | +80.9% | +94.8% | +106.6% | +93.3% | +88.6% |
+| 2020 | +92.7% | +21.8% | +89.4% | +76.9% | +82.1% |
+| 2021 | +20.3% | +13.8% | +21.1% | +11.2% | +34.5% |
+| 2022 | -20.8% | -25.6% | -21.4% | -18.0% | -26.5% |
+| 2023 | +53.6% | +47.5% | +49.6% | +53.9% | +48.9% |
+| 2024 (Haz) | +13.8% | +20.3% | +12.9% | +12.4% | +11.4% |
+
+**Sonuç: daha kârlı değil.** Fiyat dip çizgisine her değdiğinde satınca
+işlem sayısı 4-6 katına çıkıyor, çoğu küçük zararla kapanıyor ve fiyat sonra
+geri yükseliyor. Düşüşten de korumuyor: erime %35, son halinde %28-31.
+Eğitim yıllarında da kötüydü (eğitim getirisi her yıl daha düşük), yani
+eğitim bu seçeneği kendisi de seçmezdi. KABUL-1 aynen kalıyor.
+
+### 6.10 KABUL-1, dakikalık veri (2026-09-12)
+
+Kullanıcının isteği: "mevcut geçerli sistem ama saatlik değil de dakikalık
+işlem." Sistem, eşik seçenekleri, eğitim/test, maliyet aynı. Çizgiler yine 20
+gün = 20 × 390 = 7800 dakikalık bar. Tek fark: karar her dakika veriliyor.
+
+Veri: AAPL 1Min, Alpaca, 2016-01 → 2024-06-28 (1.5 milyon bar; borsa
+saatleri 09:30-15:59 ile 831 bin). Saklanan dönemin dakikalık verisi hiç
+indirilmedi. Kontrol: günde ortalama 389 bar; 2136 günün hepsinde son
+dakikanın kapanışı günlük kapanışla aynı (medyan fark %0.008).
+Seans filtresi: `lab/session.py` → `regular_minutes()`.
+Defter: `lab/KABUL-1_AAPL_takip_eden_stop.ipynb` adım 8b.
+
+Sadece test yılları (2019 → 2024-06), AAPL:
+
+| | günlük | saatlik | dakikalık |
+|---|---|---|---|
+| sistem 1 lira → | 5.80 | 6.29 | **6.32** |
+| maliyet olmasa | 5.93 | 6.53 | 6.47 |
+| baseline (kesintisiz) | 5.66 | 5.63 | 5.57 |
+| işlem | 22 | 38 | 22 |
+| zararına satılan | 4 | 19 | 3 |
+| baseline'ı geçtiği yıl | 6'da 4 | 6'da 5 | 6'da 5 |
+| en büyük erime, sistem | %27.6 | %30.5 | %30.8 |
+| en büyük erime, baseline | %31.4 | %33.8 | %35.0 |
+
+Baseline sütunları birbirinden biraz farklı: başlangıç fiyatı her veride
+2018'in son barının kapanışı (günlükte günün kapanışı, dakikalıkta 15:59).
+
+Dakikalık, her yıl eğitimde seçilen değerler: alım 0.10, takip 1.0; stop
+2019-2020'de 1.0, sonra 2.0.
+
+| test yılı | dakikalık | saatlik | günlük | baseline |
+|---|---|---|---|---|
+| 2019 | +106.6% | +106.6% | +80.9% | +88.4% |
+| 2020 | +91.7% | +89.4% | +92.7% | +82.2% |
+| 2021 | +19.6% | +21.1% | +20.3% | +34.7% |
+| 2022 | -21.0% | -21.4% | -20.8% | -26.5% |
+| 2023 | +50.6% | +49.6% | +53.6% | +48.9% |
+| 2024 (Haz) | +12.3% | +12.9% | +13.8% | +9.6% |
+
+**Sonuç:** dakikalık saatlikle neredeyse aynı (6.32 / 6.29), günlükten biraz
+iyi. Kendi baseline'ına göre fark en büyük dakikalıkta (+0.76), ama tek bir
+denemede ve çok küçük bir farkla. İşlem sayısı artmadı (22), yani maliyet
+sorunu yok. Erime baseline'dan biraz az, koruma hâlâ sınırlı. Saatlikten
+dakikalığa geçmek belirgin bir kazanç getirmedi.

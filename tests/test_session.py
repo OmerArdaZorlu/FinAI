@@ -14,6 +14,7 @@ from lab.session import (  # noqa: E402
     bars_per_day,
     exchange_hour,
     regular_hours,
+    regular_minutes,
     session_report,
 )
 
@@ -84,6 +85,26 @@ def test_daily_bars_pass_through_unchanged():
         "volume": 1_000, "trade_count": 10, "vwap": 100.0,
     })
     assert len(regular_hours(daily)) == len(daily)
+
+
+def minute_bars(start: str) -> pd.DataFrame:
+    """Tek gün, 04:00–19:59 ET arası dakikalık barlar."""
+    day = pd.Timestamp(start, tz="America/New_York").replace(hour=4)
+    ts = pd.date_range(day, periods=16 * 60, freq="min").tz_convert("UTC")
+    return pd.DataFrame({
+        "timestamp": ts,
+        "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
+        "volume": 1_000, "trade_count": 10, "vwap": 100.0,
+    })
+
+
+@pytest.mark.parametrize("start", ["2024-03-05", "2024-03-12"])   # EST, EDT
+def test_minutes_keep_0930_to_1559(start):
+    got = regular_minutes(minute_bars(start))
+    et = got["timestamp"].dt.tz_convert("America/New_York")
+    assert len(got) == 390
+    assert et.iloc[0].strftime("%H:%M") == "09:30"
+    assert et.iloc[-1].strftime("%H:%M") == "15:59"
 
 
 def test_report_flags_each_hour():

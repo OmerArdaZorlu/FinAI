@@ -88,6 +88,12 @@ class Sonuc:
     bakiye: pd.Series         # her bar sonunda paranın değeri (1.0 = başlangıç)
     cizgiler: pd.DataFrame    # timestamp, tepe, dip — grafikte çizmek için
     kurallar: Kurallar
+    # Her bar sonunda geçerli seviyeler (2026-09-11 eklendi):
+    #   alis_seviyesi — pozisyon yokken o barda alış seviyesi
+    #   koruma        — pozisyon varken bir sonraki barda geçerli satış seviyesi
+    #                   (zararına satış ya da takip eden stop)
+    #   takipte       — takip eden stop devrede mi
+    seviyeler: pd.DataFrame | None = None
 
 
 def cizgiler(df: pd.DataFrame, n: int) -> pd.DataFrame:
@@ -156,6 +162,9 @@ def calistir(df: pd.DataFrame, kurallar: Kurallar) -> Sonuc:
     zirve = mesafe = np.nan    # takipteyken görülen en yüksek fiyat, takip mesafesi
     islemler: list[dict] = []
     bakiye = np.empty(len(df))
+    alis_kayit = np.full(len(df), np.nan)
+    koruma_kayit = np.full(len(df), np.nan)
+    takip_kayit = np.zeros(len(df), dtype=bool)
 
     def sat(i: int, fiyat: float, sebep: str) -> None:
         nonlocal nakit, adet, takipte
@@ -183,6 +192,7 @@ def calistir(df: pd.DataFrame, kurallar: Kurallar) -> Sonuc:
             if genislik > 0:
                 alis_seviyesi = dip[i] + k.alim_payi * genislik
                 stop_seviyesi = dip[i] - k.stop_payi * genislik
+                alis_kayit[i] = alis_seviyesi
                 if lo[i] <= alis_seviyesi and o[i] > stop_seviyesi:
                     giris_i = i
                     giris_fiyat = min(o[i], alis_seviyesi)
@@ -218,6 +228,9 @@ def calistir(df: pd.DataFrame, kurallar: Kurallar) -> Sonuc:
 
         # Açık pozisyon, o anki kapanıştan satılsaydı ne ederdi
         bakiye[i] = nakit + adet * c[i] * (1 - k.maliyet)
+        if adet:
+            koruma_kayit[i] = stop
+            takip_kayit[i] = takipte
 
     if adet:
         sat(len(df) - 1, c[-1], "donem_sonu")
@@ -228,6 +241,12 @@ def calistir(df: pd.DataFrame, kurallar: Kurallar) -> Sonuc:
         bakiye=pd.Series(bakiye, index=pd.DatetimeIndex(ts), name="bakiye"),
         cizgiler=lines,
         kurallar=k,
+        seviyeler=pd.DataFrame({
+            "timestamp": df["timestamp"].to_numpy(),
+            "alis_seviyesi": alis_kayit,
+            "koruma": koruma_kayit,
+            "takipte": takip_kayit,
+        }, index=df.index),
     )
 
 
@@ -310,6 +329,34 @@ def egitim_test(
         Yıl başına bir satır: seçilen eşikler, eğitimdeki ve testteki getiri,
         varsayılan eşiklerle testteki getiri, aynı yılda başta al sonda sat.
     """
+    tablo, _, _ = _egitim_test(df, n, test_yillari, maliyet=maliyet,
+                               varsayilan=varsayilan, sabit=sabit)
+    return tablo
+
+
+def egitim_test_detay(
+    df: pd.DataFrame,
+    n: int,
+    test_yillari: range,
+    *,
+    maliyet: float = 0.0005,
+    varsayilan: tuple[float, float] = (0.10, 0.50),
+    sabit: dict | None = None,
+) -> tuple[pd.DataFrame, dict[int, Sonuc], dict[int, pd.DataFrame]]:
+    """`egitim_test` ile aynı hesap, ayrıntılarıyla birlikte.
+
+    Returns:
+        (tablo, yil_sonuclari, egitim_skorlari)
+        * `tablo`: `egitim_test`'in döndürdüğü tablonun aynısı.
+        * `yil_sonuclari`: her test yılının `Sonuc`'u (seçilen eşiklerle).
+        * `egitim_skorlari`: her test yılı için eğitimde denenen tüm
+          kombinasyonlar ve getirileri (satır başına bir kombinasyon).
+    """
+    return _egitim_test(df, n, test_yillari, maliyet=maliyet,
+                        varsayilan=varsayilan, sabit=sabit, detay=True)
+
+
+def _egitim_test(df, n, test_yillari, *, maliyet, varsayilan, sabit, detay=False):
     sabit = dict(sabit or {})
     izgara = [{"alim_payi": a, "stop_payi": s}
               for a in ALIM_SECENEKLERI for s in STOP_SECENEKLERI]
@@ -318,7 +365,7 @@ def egitim_test(
 
     ts = df["timestamp"]
     close = df["close"].to_numpy(float)
-    rows = []
+    rows, yil_sonuclari, egitim_skorlari = [], {}, {}
     for yil in test_yillari:
         bas = int(np.searchsorted(ts, pd.Timestamp(f"{yil}-01-01", tz="UTC")))
         son = int(np.searchsorted(ts, pd.Timestamp(f"{yil + 1}-01-01", tz="UTC")))
@@ -326,13 +373,16 @@ def egitim_test(
             raise ValueError(f"{yil} için yeterli veri yok.")
         egitim, test = df.iloc[:bas], df.iloc[bas - n:son]
 
+        def calis(veri: pd.DataFrame, ayar: dict) -> Sonuc:
+            return calistir(veri, Kurallar(n=n, maliyet=maliyet, **sabit, **ayar))
+
         def getiri(veri: pd.DataFrame, ayar: dict) -> float:
-            k = Kurallar(n=n, maliyet=maliyet, **sabit, **ayar)
-            return float(calistir(veri, k).bakiye.iloc[-1] - 1)
+            return float(calis(veri, ayar).bakiye.iloc[-1] - 1)
 
         skor = [getiri(egitim, p) for p in izgara]
         j = int(np.argmax(skor))          # eşitlikte ilk sıradaki — eski davranışla aynı
         secilen = izgara[j]
+        test_sonuc = calis(test, secilen)
         satir = {
             "test_yili": yil,
             "secilen_alim": secilen["alim_payi"],
@@ -342,11 +392,47 @@ def egitim_test(
             satir["secilen_takip"] = secilen["takip_payi"]
         satir.update({
             "egitimde": skor[j],
-            "testte": getiri(test, secilen),
+            "testte": float(test_sonuc.bakiye.iloc[-1] - 1),
             "varsayilan_esiklerle": getiri(
                 test, {"alim_payi": varsayilan[0], "stop_payi": varsayilan[1]}),
             "basta_al_sonda_sat": close[son - 1] / close[bas - 1]
                                   * (1 - maliyet) / (1 + maliyet) - 1,
         })
         rows.append(satir)
-    return pd.DataFrame(rows)
+        if detay:
+            yil_sonuclari[yil] = test_sonuc
+            egitim_skorlari[yil] = pd.DataFrame(
+                [{**p, "egitim_getirisi": s} for p, s in zip(izgara, skor)])
+    return pd.DataFrame(rows), yil_sonuclari, egitim_skorlari
+
+
+def zincirle(yil_sonuclari: dict[int, Sonuc], n: int) -> pd.Series:
+    """Test yıllarının bakiye eğrilerini arka arkaya bağlar: 1 lira nasıl büyüdü.
+
+    Her test yılının başındaki `n` ısınma barı (işlem açılmayan, önceki
+    yıldan gelen fiyatlar) atılır; her yıl bir öncekinin bittiği değerden
+    devam eder. Son değer, `egitim_test` tablosundaki `testte` getirilerinin
+    çarpımına eşittir.
+    """
+    parcalar, carpan = [], 1.0
+    for yil in sorted(yil_sonuclari):
+        eq = yil_sonuclari[yil].bakiye.iloc[n:]
+        parcalar.append(eq * carpan)
+        carpan *= float(eq.iloc[-1])
+    return pd.concat(parcalar).rename("bakiye")
+
+
+def al_tut(df: pd.DataFrame, bas: str, son: str | None = None,
+           maliyet: float = 0.0005) -> pd.Series:
+    """Baseline: `bas` tarihinden önceki son kapanışta al, hiç dokunma.
+
+    1 liranın her bar sonundaki değeri. Bir alış ve bir satış maliyeti düşülür.
+    """
+    ts = df["timestamp"]
+    i0 = int(np.searchsorted(ts, pd.Timestamp(bas, tz="UTC")))
+    i1 = len(df) if son is None else int(np.searchsorted(ts, pd.Timestamp(son, tz="UTC")))
+    if i0 < 1:
+        raise ValueError(f"{bas} öncesinde kapanış yok.")
+    c = df["close"].iloc[i0:i1].to_numpy(float) / float(df["close"].iloc[i0 - 1])
+    return pd.Series(c * (1 - maliyet) / (1 + maliyet),
+                     index=pd.DatetimeIndex(ts.iloc[i0:i1].to_numpy()), name="baseline")

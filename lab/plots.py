@@ -261,9 +261,11 @@ def rho_chart(
 
     if min_rho > 0:
         ax.axvspan(-min_rho, min_rho, color=BAND, zorder=1)
-        ax.annotate(f"|rho| < {min_rho} · eşiğin altı", xy=(0, 1), xytext=(0, 6),
+        # Şeridin içine, en alta: üstte alt başlıkla çakışıyordu.
+        ax.annotate(f"|rho| < {min_rho} · eşiğin altı", xy=(0, 0), xytext=(0, 6),
                     xycoords=("data", "axes fraction"), textcoords="offset points",
-                    ha="center", color=MUTED, fontsize=9, fontfamily=_FONTS)
+                    ha="center", va="bottom", color=MUTED, fontsize=9,
+                    fontfamily=_FONTS)
 
     ax.barh(y, values, height=0.6,
             color=[NEG if v < 0 else POS for v in values], zorder=3)
@@ -436,5 +438,437 @@ def equity_chart(
 
     ax.set_ylabel("1 liranın değeri", color=INK_SOFT, fontsize=10, fontfamily=_FONTS)
     _legend(ax, loc="upper left")
+    fig.tight_layout()
+    return fig
+
+
+# ------------------------------------------------- KABUL DEFTERİ ŞABLONU --
+# 2026-09-11 eklendi. lab/KABUL-1_AAPL_takip_eden_stop.ipynb ve ondan
+# türeyecek defterler kullanır.
+
+# Tek renkli sıralı ramp (mavi 100 → 700), ısı haritası için
+_MAVI_RAMP = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7",
+              "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"]
+
+
+def _ylabel(ax, text: str) -> None:
+    ax.set_ylabel(text, color=INK_SOFT, fontsize=10, fontfamily=_FONTS)
+
+
+def _end_label(ax, x, y, text: str) -> None:
+    ax.annotate(text, xy=(x, y), xytext=(6, 0), textcoords="offset points",
+                va="center", color=INK_SOFT, fontsize=10, fontfamily=_FONTS)
+
+
+def price_split_chart(
+    df: pd.DataFrame,
+    kasa_baslangici: str,
+    kasa_bitisi: str,
+    *,
+    sembol: str = "",
+    figsize: tuple[float, float] = (11, 4.8),
+):
+    """Araştırma dönemindeki fiyat ve saklanan verinin (kasa) yeri.
+
+    Kasa döneminin fiyatları **çizilmez**; sadece tarih aralığı gri alanla
+    işaretlenir. `df` yalnızca araştırma verisi olmalı.
+    """
+    k0, k1 = pd.Timestamp(kasa_baslangici, tz="UTC"), pd.Timestamp(kasa_bitisi, tz="UTC")
+    if df["timestamp"].iloc[-1] >= k0:
+        raise ValueError("df kasa dönemini içeriyor; yalnızca araştırma verisi verin.")
+    t0 = df["timestamp"].iloc[0]
+    fig, ax = _figure(
+        figsize, f"{sembol} — kullanılan veri ve saklanan veri",
+        f"araştırma: {t0.date()} → {df['timestamp'].iloc[-1].date()}  |  "
+        f"saklanan: {k0.date()} → {k1.date()} (açılmadı, fiyatı çizilmedi)",
+    )
+    ax.plot(df["timestamp"], df["close"], color=POS, linewidth=1.6, label="kapanış")
+    ax.axvspan(k0, k1, color=BAND, zorder=1)
+    ax.axvline(k0, color=AXIS, linewidth=1.2, zorder=2)
+    ax.text(k0 + (k1 - k0) / 2, 0.5, "saklanan veri\naçılmadı", transform=ax.get_xaxis_transform(),
+            ha="center", va="center", color=MUTED, fontsize=10, fontfamily=_FONTS)
+    ax.set_xlim(t0, k1)
+    _ylabel(ax, "fiyat")
+    fig.tight_layout()
+    return fig
+
+
+def lines_chart(
+    df: pd.DataFrame,
+    sonuc,
+    bas: str,
+    son: str,
+    *,
+    figsize: tuple[float, float] = (11, 5.2),
+):
+    """Çizgilerin nasıl çizildiği: yakın plan, son N günlük pencere işaretli."""
+    def _utc(x):
+        x = pd.Timestamp(x)
+        return x.tz_localize("UTC") if x.tzinfo is None else x.tz_convert("UTC")
+
+    t = df["timestamp"]
+    m = (t >= _utc(bas)) & (t <= _utc(son))
+    part, lines, sev = df[m], sonuc.cizgiler[m], sonuc.seviyeler[m]
+    n = sonuc.kurallar.n
+    fig, ax = _figure(
+        figsize, f"Çizgiler nasıl çiziliyor — son {n} barın en yükseği ve en düşüğü",
+        "her bar pencere bir bar kayar  |  o anki bar hesaba katılmaz  |  "
+        "gri alan: son barın çizgilerini belirleyen pencere",
+    )
+    tt = part["timestamp"]
+    # son barın penceresi: ondan önceki n bar
+    i_son = part.index[-1]
+    pencere = df.loc[i_son - n:i_son - 1, "timestamp"]
+    ax.axvspan(pencere.iloc[0], pencere.iloc[-1], color=BAND, zorder=0)
+    ax.fill_between(tt, lines["dip"], lines["tepe"], color=FILL, alpha=0.55, step="post", zorder=1)
+    ax.plot(tt, lines["tepe"], color=INK_SOFT, linewidth=1.4, drawstyle="steps-post",
+            label="tepe çizgisi (direnç)")
+    ax.plot(tt, lines["dip"], color=INK_SOFT, linewidth=1.4, linestyle="--",
+            drawstyle="steps-post", label="dip çizgisi (destek)")
+    ax.plot(tt, sev["alis_seviyesi"], color=POS, linewidth=1.2, linestyle=":",
+            drawstyle="steps-post", label="alış seviyesi (elde hisse yokken)")
+    # Çizgiler en yüksek/en düşükten çizilir; kapanış tek başına bunu göstermez.
+    ax.vlines(tt, part["low"], part["high"], color=INK_SOFT, linewidth=2.2, alpha=0.45,
+              zorder=2, label="barın en düşüğü – en yükseği")
+    ax.plot(tt, part["close"], color=INK, linewidth=1.8, label="kapanış")
+    # Fiyatın çizgiyi kırdığı barlar: çizgi bir sonraki bardan itibaren yeni seviyeye kayar
+    kirdi_ust = part["high"] > lines["tepe"]
+    kirdi_alt = part["low"] < lines["dip"]
+    ax.scatter(tt[kirdi_ust], part["high"][kirdi_ust], marker="^", s=34, color=ALT,
+               zorder=4, label="tepeyi aştı → çizgi ertesi bar yükselir")
+    ax.scatter(tt[kirdi_alt], part["low"][kirdi_alt], marker="v", s=34, color=NEG,
+               zorder=4, label="dibi aştı → çizgi ertesi bar düşer")
+    _ylabel(ax, "fiyat")
+    _legend(ax, loc="upper left", ncol=2)
+    fig.tight_layout()
+    return fig
+
+
+def trade_anatomy_chart(
+    df: pd.DataFrame,
+    sonuc,
+    islem_no: int,
+    *,
+    pay: int = 10,
+    figsize: tuple[float, float] = (11, 5.5),
+):
+    """Tek bir işlemin baştan sona hikâyesi: al, koruma seviyesi, tepeye değme, sat."""
+    tr = sonuc.islemler.iloc[islem_no]
+    t = df["timestamp"]
+    i_al = int(np.searchsorted(t, tr["alis_zamani"]))
+    i_sat = int(np.searchsorted(t, tr["satis_zamani"]))
+    a, b = max(i_al - pay, 0), min(i_sat + pay, len(df) - 1)
+    part = df.iloc[a:b + 1]
+    lines, sev = sonuc.cizgiler.iloc[a:b + 1], sonuc.seviyeler.iloc[a:b + 1]
+    tt = part["timestamp"]
+
+    getiri = tr["getiri_maliyetli"]
+    fig, ax = _figure(
+        figsize, f"Bir işlemin anatomisi — {pd.Timestamp(tr['alis_zamani']).date()} → "
+                 f"{pd.Timestamp(tr['satis_zamani']).date()}",
+        f"{tr['bar']} bar tutuldu  |  satış sebebi: {tr['sebep']}  |  "
+        f"maliyet dahil {getiri:+.1%}  |  kırmızı ve turuncu: o an geçerli satış seviyesi",
+    )
+    ax.plot(tt, lines["tepe"], color=AXIS, linewidth=1.3, drawstyle="steps-post",
+            label="tepe çizgisi")
+    ax.plot(tt, lines["dip"], color=AXIS, linewidth=1.3, linestyle="--",
+            drawstyle="steps-post", label="dip çizgisi")
+    ax.plot(tt, part["close"], color=INK, linewidth=1.8, label="kapanış")
+
+    # Sadece bu işlemin seviyeleri: pencerede başka işlem varsa onlarınkini gösterme
+    bu_islem = np.zeros(len(sev), dtype=bool)
+    bu_islem[i_al - a:i_sat - a + 1] = True
+    takipte = sev["takipte"].to_numpy()
+    kor = sev["koruma"].where(bu_islem & ~takipte)
+    tak = sev["koruma"].where(bu_islem & takipte)
+
+    # Eksen fiyata göre kurulur. Zararına satış seviyesi fiyatın çok altında
+    # olabilir (stop payı 2 gibi); onu çizmek için ekseni aşağı çekmek grafiği
+    # okunmaz yapıyor — o durumda çizgi yerine not düşülür.
+    alt = float(min(part["low"].min(), tak.min() if tak.notna().any() else np.inf))
+    ust = float(max(part["high"].max(), lines["tepe"].max()))
+    ax.set_ylim(alt - 0.06 * (ust - alt), ust + 0.10 * (ust - alt))
+
+    # Yastık: takip başladıktan sonra fiyatın satış seviyesine olan mesafesi
+    ax.fill_between(tt, tak, part["close"], where=tak.notna(),
+                    color=FILL, alpha=0.5, step="post", zorder=0)
+    ax.plot(tt, kor, color=NEG, linewidth=2.0, drawstyle="steps-post",
+            label="zararına satış seviyesi")
+    ax.plot(tt, tak, color=ALT, linewidth=2.0, drawstyle="steps-post",
+            label="takip eden stop (sadece yukarı gider)")
+
+    if kor.notna().any() and float(kor.min()) < ax.get_ylim()[0]:
+        s = float(kor.iloc[int(np.argmax(kor.notna().to_numpy()))])
+        ax.annotate(f"zararına satış seviyesi {s:,.0f}\n"
+                    f"(alış fiyatının %{100 * (1 - s / tr['alis']):.0f} altı, grafiğin dışında)",
+                    xy=(tr["alis_zamani"], ax.get_ylim()[0]), xytext=(8, 10),
+                    textcoords="offset points", color=NEG, fontsize=9,
+                    fontfamily=_FONTS, va="bottom",
+                    bbox=dict(facecolor=SURFACE, edgecolor="none", pad=1.5))
+
+    ax.scatter([tr["alis_zamani"]], [tr["alis"]], marker="^", s=110, color=POS,
+               edgecolor=SURFACE, linewidth=1.4, zorder=6, label="al")
+    ax.scatter([tr["satis_zamani"]], [tr["satis"]], marker="D", s=80,
+               color=ALT if tr["sebep"] == "takip" else NEG,
+               edgecolor=INK_SOFT, linewidth=1.2, zorder=6, label="sat")
+    ax.annotate(f"al {tr['alis']:,.0f}", xy=(tr["alis_zamani"], tr["alis"]),
+                xytext=(0, -16), textcoords="offset points", ha="center",
+                color=POS, fontsize=9.5, fontfamily=_FONTS)
+    ax.annotate(f"sat {tr['satis']:,.0f}  ({getiri:+.0%})",
+                xy=(tr["satis_zamani"], tr["satis"]), xytext=(10, -4),
+                textcoords="offset points", ha="left",
+                color=ALT if tr["sebep"] == "takip" else NEG, fontsize=9.5,
+                fontfamily=_FONTS,
+                bbox=dict(facecolor=SURFACE, edgecolor="none", pad=1.5))
+    # tepeye ilk değdiği an
+    ilk = sev.index[bu_islem & takipte]
+    if len(ilk):
+        j = ilk[0]
+        ax.scatter([df.loc[j, "timestamp"]], [df.loc[j, "high"]], marker="o", s=70,
+                   facecolor="none", edgecolor=ALT, linewidth=2.0, zorder=6,
+                   label="tepeye değdi → takip başladı")
+    _ylabel(ax, "fiyat")
+    _legend(ax, loc="upper left", ncol=2)
+    fig.tight_layout()
+    return fig
+
+
+def grid_heatmap(
+    skorlar: pd.DataFrame,
+    secilen: dict,
+    *,
+    baslik: str = "Eğitimde denenen ayarlar",
+    figsize: tuple[float, float] = (12, 4.2),
+):
+    """Eğitimde denenen tüm eşik kombinasyonları: her hücre 1 liranın değeri.
+
+    Satır: alım payı, sütun: zararına satış payı, panel: takip mesafesi.
+    Seçilen kombinasyon kalın çerçeveli.
+    """
+    from matplotlib.colors import LinearSegmentedColormap, Normalize
+
+    cmap = LinearSegmentedColormap.from_list("mavi", _MAVI_RAMP)
+    deger = skorlar["egitim_getirisi"] + 1
+    norm = Normalize(vmin=float(deger.min()), vmax=float(deger.max()))
+    alimlar = sorted(skorlar["alim_payi"].unique())
+    stoplar = sorted(skorlar["stop_payi"].unique())
+    takipler = sorted(skorlar["takip_payi"].unique()) if "takip_payi" in skorlar else [None]
+
+    fig, axes = plt.subplots(1, len(takipler), figsize=figsize, squeeze=False)
+    fig.patch.set_facecolor(SURFACE)
+    for ax, tk in zip(axes[0], takipler):
+        s = skorlar if tk is None else skorlar[skorlar["takip_payi"] == tk]
+        mat = (s.pivot(index="alim_payi", columns="stop_payi", values="egitim_getirisi")
+                .reindex(index=alimlar, columns=stoplar) + 1)
+        ax.imshow(mat.to_numpy(), cmap=cmap, norm=norm, aspect="auto")
+        for r, al in enumerate(alimlar):
+            for c_, st in enumerate(stoplar):
+                v = mat.iloc[r, c_]
+                koyu = norm(v) > 0.55
+                ax.text(c_, r, f"{v:.2f}", ha="center", va="center", fontsize=10,
+                        color=SURFACE if koyu else INK, fontfamily=_FONTS)
+                if (secilen.get("alim_payi") == al and secilen.get("stop_payi") == st
+                        and (tk is None or secilen.get("takip_payi") == tk)):
+                    ax.add_patch(plt.Rectangle((c_ - 0.5, r - 0.5), 1, 1, fill=False,
+                                               edgecolor=INK, linewidth=3))
+        ax.set_xticks(range(len(stoplar)), [f"{v:g}" for v in stoplar])
+        ax.set_yticks(range(len(alimlar)), [f"{v:g}" for v in alimlar])
+        ax.set_xlabel("zararına satış payı", color=INK_SOFT, fontsize=9.5, fontfamily=_FONTS)
+        if ax is axes[0][0]:
+            ax.set_ylabel("alım payı", color=INK_SOFT, fontsize=9.5, fontfamily=_FONTS)
+        ax.set_title("" if tk is None else f"takip mesafesi {tk:g}", color=INK_SOFT,
+                     fontsize=10.5, fontfamily=_FONTS)
+        ax.tick_params(colors=MUTED, length=0)
+        for side in ax.spines.values():
+            side.set_visible(False)
+    fig.suptitle(baslik, x=0.01, ha="left", color=INK, fontsize=13, fontweight="bold",
+                 fontfamily=_FONTS)
+    fig.text(0.01, 0.885, "her hücre: eğitim döneminde 1 liranın değeri  |  kalın çerçeve: seçilen",
+             color=INK_SOFT, fontsize=9.5, fontfamily=_FONTS)
+    fig.tight_layout(rect=(0, 0, 1, 0.86))
+    return fig
+
+
+def compare_equity_chart(
+    sistem: pd.Series,
+    baseline: pd.Series,
+    *,
+    baslik: str = "1 lira ne oldu",
+    alt_baslik: str = "",
+    figsize: tuple[float, float] = (11, 5),
+):
+    """İki bakiye eğrisi: sistem ve başta al, sonda sat."""
+    fig, ax = _figure(figsize, baslik, alt_baslik)
+    ax.plot(baseline.index, baseline.to_numpy(), color=ALT, linewidth=2.0,
+            label="başta al, sonda sat (baseline)")
+    ax.plot(sistem.index, sistem.to_numpy(), color=POS, linewidth=2.0, label="sistem")
+    ax.axhline(1.0, color=AXIS, linewidth=1.0, zorder=1)
+    _end_label(ax, baseline.index[-1], baseline.iloc[-1], f"{baseline.iloc[-1]:.2f}")
+    _end_label(ax, sistem.index[-1], sistem.iloc[-1], f"{sistem.iloc[-1]:.2f}")
+    _ylabel(ax, "1 liranın değeri")
+    _legend(ax, loc="upper left")
+    fig.tight_layout()
+    return fig
+
+
+def gap_chart(
+    seriler: dict[str, tuple[pd.Series, pd.Series]],
+    *,
+    baslik: str = "Sistem baseline'dan ne kadar önde",
+    alt_baslik: str = "",
+    figsize: tuple[float, float] = (11, 5),
+):
+    """Her veri için sistem ÷ baseline − 1, gün sonu değerleriyle.
+
+    `seriler`: {"günlük": (sistem, baseline), ...}. Günlük, saatlik ve
+    dakikalık aynı eksende kıyaslansın diye her gün son bar alınır.
+    0'ın üstü: sistem önde. Eğri ne kadar erken yükselirse fark o kadar hızlı açılmış.
+    """
+    renkler = [INK_SOFT, ALT, POS]
+    fig, ax = _figure(figsize, baslik, alt_baslik)
+    ax.axhline(0, color=AXIS, linewidth=1.2, zorder=1)
+    for (ad, (sis, base)), renk in zip(seriler.items(), renkler):
+        fark = sis / base.reindex(sis.index) - 1
+        gun = fark.groupby(fark.index.tz_convert("America/New_York").date).last()
+        gun.index = pd.to_datetime(gun.index)
+        ax.plot(gun.index, gun.to_numpy(), color=renk, linewidth=1.8, label=ad)
+        _end_label(ax, gun.index[-1], gun.iloc[-1], f"{gun.iloc[-1]:+.0%}")
+    _pct(ax, decimals=0)
+    _ylabel(ax, "sistem, baseline'dan % önde")
+    _legend(ax, loc="upper left")
+    fig.tight_layout()
+    return fig
+
+
+def yearly_bars_chart(
+    yillar: Sequence,
+    sistem: Sequence[float],
+    baseline: Sequence[float],
+    *,
+    baslik: str = "Yıl yıl getiri",
+    alt_baslik: str = "",
+    figsize: tuple[float, float] = (11, 5),
+):
+    """Her yıl sistem ve baseline yan yana; değerler çubukların üstünde."""
+    x = np.arange(len(yillar))
+    w = 0.38
+    fig, ax = _figure(figsize, baslik, alt_baslik)
+    ax.bar(x - w / 2 - 0.01, sistem, width=w, color=POS, zorder=3, label="sistem")
+    ax.bar(x + w / 2 + 0.01, baseline, width=w, color=ALT, zorder=3,
+           label="başta al, sonda sat (baseline)")
+    ax.axhline(0, color=AXIS, linewidth=1.2, zorder=4)
+    for xi, s, b in zip(x, sistem, baseline):
+        for dx, v in ((-w / 2 - 0.01, s), (w / 2 + 0.01, b)):
+            ax.annotate(f"{v:+.0%}", xy=(xi + dx, v), xytext=(0, 4 if v >= 0 else -4),
+                        textcoords="offset points", ha="center",
+                        va="bottom" if v >= 0 else "top", color=INK_SOFT, fontsize=8.5,
+                        fontfamily=_FONTS)
+    ax.set_xticks(x, [str(y) for y in yillar])
+    _pct(ax, decimals=0)
+    _ylabel(ax, "getiri")
+    ax.margins(y=0.15)
+    _legend(ax, loc="upper right")
+    fig.tight_layout()
+    return fig
+
+
+def drawdown_chart(
+    sistem: pd.Series,
+    baseline: pd.Series,
+    *,
+    baslik: str = "Zirveden kayıp — paranın bir ara ne kadarı eridi",
+    figsize: tuple[float, float] = (11, 4.6),
+):
+    """Her an, o ana kadarki en yüksek değere göre kayıp. 0 = zirvede."""
+    dd_s = sistem / sistem.cummax() - 1
+    dd_b = baseline / baseline.cummax() - 1
+    fig, ax = _figure(
+        figsize, baslik,
+        f"en büyük kayıp: sistem {dd_s.min():.0%}  |  baseline {dd_b.min():.0%}",
+    )
+    ax.fill_between(dd_b.index, dd_b.to_numpy(), 0, color=ALT, alpha=0.18, zorder=1)
+    ax.plot(dd_b.index, dd_b.to_numpy(), color=ALT, linewidth=1.6,
+            label="başta al, sonda sat (baseline)")
+    ax.plot(dd_s.index, dd_s.to_numpy(), color=POS, linewidth=1.8, label="sistem")
+    ax.axhline(0, color=AXIS, linewidth=1.0)
+    _pct(ax, decimals=0)
+    _ylabel(ax, "zirveden kayıp")
+    _legend(ax, loc="lower left")
+    fig.tight_layout()
+    return fig
+
+
+def trade_returns_chart(
+    islemler: pd.DataFrame,
+    *,
+    baslik: str = "İşlem başına getiri (maliyet dahil)",
+    figsize: tuple[float, float] = (11, 4.8),
+):
+    """Her işlem bir çubuk. Renk kazanç/kayıp, çubuğun ucundaki işaret satış sebebi."""
+    g = islemler["getiri_maliyetli"].to_numpy()
+    x = np.arange(len(g))
+    kaz = int((g > 0).sum())
+    fig, ax = _figure(figsize, baslik,
+                      f"{len(g)} işlem  |  {kaz} kazançlı, {len(g) - kaz} zararlı  |  "
+                      f"ortalama {g.mean():+.1%}")
+    ax.bar(x, g, width=0.7, color=[POS if v > 0 else NEG for v in g], zorder=3)
+    ax.axhline(0, color=AXIS, linewidth=1.2, zorder=4)
+    isaret = {"takip": ("D", "takip eden stopla satış"), "stop": ("X", "zararına satış"),
+              "donem_sonu": ("o", "yıl/dönem sonunda kapatıldı"), "tepe": ("v", "tepede satış")}
+    for sebep, (mk, ad) in isaret.items():
+        m = (islemler["sebep"] == sebep).to_numpy()
+        if m.any():
+            ax.scatter(x[m], g[m], marker=mk, s=45, color=SURFACE, edgecolor=INK_SOFT,
+                       linewidth=1.3, zorder=5, label=ad)
+    ax.set_xticks(x, [pd.Timestamp(t).strftime("%Y-%m") for t in islemler["alis_zamani"]],
+                  rotation=60, ha="right", fontsize=8)
+    _pct(ax, decimals=0)
+    _ylabel(ax, "getiri")
+    _legend(ax, loc="upper left", ncol=3)
+    ax.margins(y=0.2)
+    fig.tight_layout()
+    return fig
+
+
+def test_trades_chart(
+    df: pd.DataFrame,
+    yil_sonuclari: dict,
+    *,
+    figsize: tuple[float, float] = (12, 5.5),
+):
+    """Tüm test yılları tek grafikte: fiyat, çizgiler, al-sat noktaları, yıl sınırları."""
+    n = next(iter(yil_sonuclari.values())).kurallar.n
+    parca_c, parca_l, tr = [], [], []
+    for yil in sorted(yil_sonuclari):
+        s = yil_sonuclari[yil]
+        parca_l.append(s.cizgiler.iloc[n:])
+        tr.append(s.islemler)
+    lines = pd.concat(parca_l)
+    part = df.loc[lines.index]
+    tr = pd.concat(tr, ignore_index=True)
+    tt = part["timestamp"]
+    fig, ax = _figure(
+        figsize, "Test yıllarındaki tüm işlemler",
+        f"{tt.iloc[0].date()} → {tt.iloc[-1].date()}  |  {len(tr)} işlem  |  "
+        "dikey çizgiler: yıl sınırları (her yıl ayrı eğitildi)",
+    )
+    ax.plot(tt, lines["tepe"], color=AXIS, linewidth=1.0, drawstyle="steps-post",
+            label="tepe çizgisi")
+    ax.plot(tt, lines["dip"], color=AXIS, linewidth=1.0, linestyle="--",
+            drawstyle="steps-post", label="dip çizgisi")
+    ax.plot(tt, part["close"], color=INK_SOFT, linewidth=1.4, label="kapanış")
+    for yil in sorted(yil_sonuclari)[1:]:
+        ax.axvline(pd.Timestamp(f"{yil}-01-01", tz="UTC"), color=GRID, linewidth=2, zorder=0)
+    ax.scatter(tr["alis_zamani"], tr["alis"], marker="^", s=70, color=POS,
+               edgecolor=SURFACE, linewidth=1.2, zorder=5, label="al")
+    for sebep, mk, renk, ad in (("takip", "D", ALT, "takip eden stopla sat"),
+                                ("stop", "X", NEG, "zararına sat"),
+                                ("donem_sonu", "o", MUTED, "yıl sonunda kapatıldı")):
+        m = tr["sebep"] == sebep
+        if m.any():
+            ax.scatter(tr.loc[m, "satis_zamani"], tr.loc[m, "satis"], marker=mk, s=60,
+                       color=renk, edgecolor=INK_SOFT, linewidth=1.0, zorder=5, label=ad)
+    _ylabel(ax, "fiyat")
+    _legend(ax, loc="upper left", ncol=3)
     fig.tight_layout()
     return fig
