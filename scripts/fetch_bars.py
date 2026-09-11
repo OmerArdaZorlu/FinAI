@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
 
             span = f"{df['timestamp'].iloc[0].date()} → {df['timestamp'].iloc[-1].date()}"
-            print(f"  [{symbol}] OK — {written} bar yazıldı, {span}")
+            print(f"  [{symbol}] OK — {written} bar yazıldı, {span}", flush=True)
 
             if args.csv_dir:
                 args.csv_dir.mkdir(parents=True, exist_ok=True)

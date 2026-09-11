@@ -164,7 +164,7 @@ def fetch_bars(
         rows.extend(batch)
         page += 1
         if verbose:
-            print(f"  [{symbol}] sayfa {page}: {len(batch):>6} bar (toplam {len(rows)})")
+            print(f"  [{symbol}] sayfa {page}: {len(batch):>6} bar (toplam {len(rows)})", flush=True)
 
         token = payload.get("next_page_token")
         if not token:

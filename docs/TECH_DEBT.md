@@ -295,6 +295,7 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 
 **Sorun.** Saatlik barla AAPL'da yılda ~1.750 örnek; 5 yıl ≈ 8.750 satır, ~6 feature, ve çok düşük sinyal/gürültü oranı. XGBoost bu boyutta ezberlemeye fazlasıyla yatkın.
 
+
 **Çözüm.**
 1. Model kapasitesini agresif sınırla: `max_depth` 2–3, güçlü regularization, düşük learning rate + early stopping (walk-forward validation üzerinde).
 2. **Havuzlanmış (pooled) eğitim** düşün: 30–50 likit hisseyi aynı feature şemasıyla eğitip AAPL'da işlem yap. Örnek sayısını ~30x artırır ve modeli tek hisseye ezberlemekten kurtarır. Mimari buna zaten uygun — feature'lar sembol-bağımsız ve normalize.
