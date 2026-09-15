@@ -26,3 +26,6 @@ venv/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Acil durdurma bayragi - yanlislikla repoya girerse baska makinede motoru durdurur
+data/DUR

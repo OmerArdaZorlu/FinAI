@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lab.session import (  # noqa: E402
+from src.data.session import (  # noqa: E402
     bars_per_day,
     exchange_hour,
     regular_hours,

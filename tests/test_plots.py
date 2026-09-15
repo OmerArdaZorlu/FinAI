@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lab import plots  # noqa: E402
 from lab.analysis import bin_table  # noqa: E402
-from lab.session import session_report  # noqa: E402
+from src.data.session import session_report  # noqa: E402
 from tests.test_session import hourly_bars  # noqa: E402
 
 

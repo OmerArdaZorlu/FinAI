@@ -1,5 +1,13 @@
 """Destek-direnç aralığında al-sat — geçmiş veride deneme (backtest).
 
+Kurallar burada DEĞİL
+---------------------
+Al-sat kurallarının tek kopyası `src/engine/kural.py`'dedir; canlı motor da
+aynı fonksiyonu çağırır (TECH_DEBT.md TD-01). Bu dosya kalan işi yapar:
+çizgileri hesaplar, barları sırayla o fonksiyona verir, para/hisse muhasebesini
+tutar ve eğitim/test düzenini kurar. Kuralı değiştirmek isteyen `kural.py`'ye
+gider — burada değiştirilirse canlı sistem backtest'ten ayrışır.
+
 Sistem
 ------
 * **Tepe çizgisi (direnç):** son N barın en yüksek fiyatı.
@@ -61,23 +69,22 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from src.engine.kural import (
+    AL,
+    SEBEP_DONEM_SONU,
+    Bar,
+    Cizgi,
+    Durum,
+    Kurallar,
+    emir_seviyeleri,
+    uygula,
+)
 
-@dataclass(frozen=True)
-class Kurallar:
-    """Sistemin ayarları. Varsayılanlar kullanıcının verdiği kurallardır."""
-
-    n: int                    # çizgi penceresi (bar). Günlükte 5, saatlikte 35 = 1 hafta
-    alim_payi: float = 0.10   # dipten kanal genişliğinin %10'u kadar yukarısı → al
-    stop_payi: float = 0.50   # dibin kanal genişliğinin yarısı kadar altı → zararına sat
-    maliyet: float = 0.0005   # her alış ve satışta %0.05
-
-    # --- 2026-09-11 eklendi. Varsayılanlar eski davranışı aynen korur. ---
-    cizgi: str = "donchian"        # "donchian": son n barın en yükseği/en düşüğü
-                                   # "bollinger": son n kapanışın ortalaması ± k × sapma
-    sapma_katsayisi: float = 2.0   # Bollinger'daki k
-    satis: str = "tepe"            # "tepe": tepe çizgisine değince sat
-                                   # "takip": tepeye değince satma, takip eden stop'a geç
-    takip_payi: float = 0.50       # takip mesafesi: tepeye değildiği andaki genişliğin yarısı
+__all__ = [
+    "Kurallar", "Sonuc", "cizgiler", "bollinger_cizgiler", "calistir",
+    "en_buyuk_dusus", "ozet", "egitim_test", "egitim_test_detay",
+    "zincirle", "al_tut",
+]
 
 
 @dataclass(frozen=True)
@@ -140,12 +147,8 @@ def calistir(df: pd.DataFrame, kurallar: Kurallar) -> Sonuc:
     k = kurallar
     if k.cizgi == "donchian":
         lines = cizgiler(df, k.n)
-    elif k.cizgi == "bollinger":
-        lines = bollinger_cizgiler(df, k.n, k.sapma_katsayisi)
     else:
-        raise ValueError(f"cizgi 'donchian' ya da 'bollinger' olmalı, verilen: {k.cizgi}")
-    if k.satis not in ("tepe", "takip"):
-        raise ValueError(f"satis 'tepe' ya da 'takip' olmalı, verilen: {k.satis}")
+        lines = bollinger_cizgiler(df, k.n, k.sapma_katsayisi)
     o = df["open"].to_numpy(float)
     h = df["high"].to_numpy(float)
     lo = df["low"].to_numpy(float)
@@ -156,22 +159,17 @@ def calistir(df: pd.DataFrame, kurallar: Kurallar) -> Sonuc:
 
     nakit = 1.0
     adet = 0.0                 # elimizdeki hisse (kesirli)
+    durum = Durum()            # kuralın gördüğü pozisyon hali
     giris_i = -1
-    giris_fiyat = stop = np.nan
-    takipte = False            # tepeye değdi, takip eden stop devrede
-    zirve = mesafe = np.nan    # takipteyken görülen en yüksek fiyat, takip mesafesi
+    giris_fiyat = np.nan
     islemler: list[dict] = []
     bakiye = np.empty(len(df))
     alis_kayit = np.full(len(df), np.nan)
     koruma_kayit = np.full(len(df), np.nan)
     takip_kayit = np.zeros(len(df), dtype=bool)
 
-    def sat(i: int, fiyat: float, sebep: str) -> None:
-        nonlocal nakit, adet, takipte
-        if sebep == "stop" and takipte:
-            sebep = "takip"            # takip eden stop seviyesinden satıldı
-        takipte = False
-        nakit = adet * fiyat * (1 - k.maliyet)
+    def kaydet_satis(i: int, fiyat: float, sebep: str) -> None:
+        """Kapanan işlemi deftere yazar. Para muhasebesi çağıranda."""
         islemler.append({
             "alis_zamani": ts[giris_i], "alis": giris_fiyat,
             "satis_zamani": ts[i], "satis": fiyat, "sebep": sebep,
@@ -180,60 +178,43 @@ def calistir(df: pd.DataFrame, kurallar: Kurallar) -> Sonuc:
             "getiri_maliyetli": (fiyat * (1 - k.maliyet))
                                 / (giris_fiyat * (1 + k.maliyet)) - 1,
         })
-        adet = 0.0
 
     for i in range(len(df)):
         if np.isnan(tepe[i]):          # çizgiler henüz oluşmadı
             bakiye[i] = nakit
             continue
-        genislik = tepe[i] - dip[i]
 
-        if adet == 0.0:
-            if genislik > 0:
-                alis_seviyesi = dip[i] + k.alim_payi * genislik
-                stop_seviyesi = dip[i] - k.stop_payi * genislik
-                alis_kayit[i] = alis_seviyesi
-                if lo[i] <= alis_seviyesi and o[i] > stop_seviyesi:
-                    giris_i = i
-                    giris_fiyat = min(o[i], alis_seviyesi)
-                    stop = stop_seviyesi
-                    adet = nakit / (giris_fiyat * (1 + k.maliyet))
-                    nakit = 0.0
-                    if lo[i] <= stop:  # aynı barda stop'a da indi
-                        sat(i, stop, "stop")
-        else:
-            if o[i] <= stop:
-                sat(i, o[i], "stop")
-            elif lo[i] <= stop:
-                sat(i, stop, "stop")
-            elif takipte:
-                pass                   # takipteyken tepe çizgisinde satılmaz
-            elif k.satis == "tepe" and o[i] >= tepe[i]:
-                sat(i, o[i], "tepe")
-            elif k.satis == "tepe" and h[i] >= tepe[i]:
-                sat(i, tepe[i], "tepe")
-            elif k.satis == "takip" and h[i] >= tepe[i]:
-                # Tepeye değdi: satma, takip eden stop'a geç. Mesafe o anki
-                # genişlikle sabitlenir.
-                takipte = True
-                mesafe = k.takip_payi * genislik
-                zirve = h[i]
+        cizgi = Cizgi(tepe[i], dip[i])
+        bar = Bar(o[i], h[i], lo[i], c[i])
 
-            # Takip eden stop: seviye yalnızca yukarı gider. Bu barın en
-            # yükseğiyle hesaplanan seviye BİR SONRAKİ bardan itibaren geçerli;
-            # bar içinde en yükseğin mi en düşüğün mü önce geldiğini bilmiyoruz.
-            if adet and takipte:
-                zirve = max(zirve, h[i])
-                stop = max(stop, zirve - mesafe)
+        # Motorun bu bar için koyacağı emirler — grafikte göstermek için kaydet.
+        if not durum.acik:
+            alis_kayit[i] = emir_seviyeleri(durum, cizgi, k).alis
+
+        durum, olaylar = uygula(durum, bar, cizgi, k)
+
+        for olay in olaylar:
+            if olay.eylem == AL:
+                giris_i = i
+                giris_fiyat = olay.fiyat
+                adet = nakit / (olay.fiyat * (1 + k.maliyet))
+                nakit = 0.0
+            else:
+                nakit = adet * olay.fiyat * (1 - k.maliyet)
+                kaydet_satis(i, olay.fiyat, olay.sebep)
+                adet = 0.0
 
         # Açık pozisyon, o anki kapanıştan satılsaydı ne ederdi
         bakiye[i] = nakit + adet * c[i] * (1 - k.maliyet)
         if adet:
-            koruma_kayit[i] = stop
-            takip_kayit[i] = takipte
+            koruma_kayit[i] = durum.stop
+            takip_kayit[i] = durum.takipte
 
     if adet:
-        sat(len(df) - 1, c[-1], "donem_sonu")
+        nakit = adet * c[-1] * (1 - k.maliyet)
+        kaydet_satis(len(df) - 1, c[-1], SEBEP_DONEM_SONU)
+        adet = 0.0
+        durum = Durum()
         bakiye[-1] = nakit
 
     return Sonuc(
