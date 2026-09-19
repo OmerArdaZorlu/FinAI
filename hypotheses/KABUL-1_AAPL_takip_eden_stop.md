@@ -60,6 +60,106 @@ dibin çok altına inerse zararına sat.
 - Fiyat 230'a çıkar: stop 210'a yükselir.
 - Fiyat 210'a iner: **sat**.
 
+### Sistem nasıl çalışıyor — görsel anlatım
+
+Yukarıdaki formüller sistemin *ne hesapladığını* söylüyor ama *niye öyle
+davrandığını* söylemiyor. Bu bölüm onu açar. Sayılar aynı örnekten:
+**tepe 200, dip 180, genişlik 20.**
+
+#### Fikir
+
+Hissenin altına bir **taban fiyat** koyuyoruz. Fiyat o tabana inerse
+satıyoruz. Tabanın tek özelliği şu:
+
+> **Taban yalnızca yukarı hareket eder, asla aşağı inmez.**
+
+Hisse yükseldikçe tabanı arkasından yukarı çekiyoruz. Hisse düşerse taban
+olduğu yerde kalıyor ve fiyat ona değince satıyoruz. Böylece yükselişin
+devamını kaçırmıyor, ama dönüşte de kazancın tamamını geri vermiyoruz.
+
+Taban hemen takip etmeye başlamıyor. Önce hissenin gerçekten yükseldiğine dair
+bir işaret bekliyoruz: **fiyatın tepe çizgisine — son 20 günün en yükseğine —
+değmesi.** O ana kadar taban, alışta kurulan zararına satış seviyesinde sabit
+duruyor.
+
+#### Terimler
+
+| metinde | kodda (`src/engine/kural.py`) | ne demek |
+|---|---|---|
+| taban | `stop` | Satacağımız fiyat. Her an **tek bir tane** var; takip başlayınca aynı değişkenin üstüne daha yüksek değer yazılır. |
+| takip başladı mı | `takipte` | Evet/hayır. Tepeye değene kadar hayır. |
+| mesafe | `mesafe` | Tabanın zirveden kaç lira aşağıda duracağı. Tepeye **değdiği anda dondurulur**, bir daha hesaplanmaz. |
+| oran | `takip_payi` | O mesafenin kanal genişliğinin kaç katı olduğu — burada 1.0, yani mesafe = 20. |
+
+Mesafe neden sabit lira ya da yüzde değil de kanal genişliğinin katı? Çünkü
+kanal genişliği hissenin o dönemki oynaklığının ölçüsü. Oynak dönemde kanal
+geniş → taban uzakta durur, normal dalgalanmada boşuna satmayız. Sakin dönemde
+kanal dar → taban yakınlaşır.
+
+#### Adım adım
+
+```
+adım        1      2      3      4      5      6
+fiyat     182 →  195 →  200 →  230 →  220 →  210
+taban     140    140    180    210    210    210
+                         ▲      ▲             ▲
+                         │      │             └ fiyat tabana değdi → SAT
+                         │      └ yeni zirve → taban 230−20 = 210
+                         └ tepe çizgisine (200) değdi → takip başladı,
+                           mesafe 20 donduruldu, taban 200−20 = 180
+```
+
+| adım | fiyat | taban | ne oldu |
+|---|---|---|---|
+| 1 | **182** | 140 | Dip çizgisine yaklaştı, **aldık**. Taban 140'a kuruldu (dipten 2 genişlik aşağısı). |
+| 2 | 195 | 140 | Yükseliyor ama tepeye değmedi. Takip başlamadı, taban kıpırdamadı. |
+| 3 | **200** | **180** | Tepe çizgisine **değdi**. Satmıyoruz — takip başlıyor. Mesafe 20 dondurulur, taban 180'e fırlar. |
+| 4 | **230** | **210** | Yeni zirve. Taban 230 − 20 = 210'a çekilir. |
+| 5 | 220 | 210 | Fiyat düştü ama **taban inmedi**. Kazanılan koruma geri verilmiyor. |
+| 6 | 210 | — | Fiyat tabana değdi → **sattık**. |
+
+Üçüncü adıma dikkat: tepeye değmek aynı anda zararına satış seviyesini de
+yukarı taşıyor. Artık en kötü ihtimalle 180'den çıkıyoruz, 140'tan değil.
+
+Beşinci adım da önemli: 230'da satmadık, 210'da sattık — 20 lira geri verdik.
+Karşılığında, fiyat 230'dan 300'e gitseydi tabanı 280'e kadar çekip oradan
+satacaktık. Erken satmama özgürlüğünü bu 20 lirayla satın alıyoruz. Eski
+sistem (tepede sat) tam burada kaybediyordu: 200'de satıp 230'a kadar olan
+yükselişi kaçırıyordu.
+
+#### Gerçekte nasıl görünüyor
+
+Kurgu bitti; aşağısı gerçek bir işlem. AAPL, günlük bar, 2020-11-02 →
+2021-01-29. 106'dan alınmış, takip eden stop tetiklenerek 126'dan satılmış,
+maliyet dahil **+%19.4**.
+
+![AAPL'da bir işlemin anatomisi: alış, tepeye değme, takip eden stopun basamak basamak yükselişi ve satış](gorseller/kabul1_islem_anatomisi.png)
+
+Grafiği okurken:
+
+- **Turuncu çizgi tabandır.** Basamaklı çizilmiş, çünkü ancak yeni bir zirve
+  geldiğinde kıpırdıyor. Baştan sona bakın: **hiçbir yerde aşağı inmiyor.**
+- **Turuncu halka**, fiyatın tepe çizgisine değdiği an — takibin başladığı
+  nokta. Ondan öncesi düz, sonrası basamaklı.
+- **Mavi dolgu**, fiyat ile taban arasındaki yastık. Fiyat yükseldikçe yastık
+  açılıyor, taban arkadan geldikçe kapanıyor; sağ uçta kapanıp satış geliyor.
+- **Zararına satış seviyesi grafikte yok**, sol altta yazıyla not düşülmüş: 70,
+  yani alış fiyatının %34 altı. `stop_payi = 2.0` olduğu için o kadar aşağıda
+  kalıyor ki çizilseydi grafiğin geri kalanı okunmaz olurdu. Bu işlemde zaten
+  hiç yaklaşılmamış.
+- Grafik **sabit eşiklerle** (0.10 / 2.00 / 1.00) üretildi, aşağıdaki yıl yıl
+  eğitim tablosuyla değil — mekanizmayı göstermek için.
+
+Yeniden üretmek için: `python scripts/kabul1_gorsel.py`
+
+#### Bir zamanlama ayrıntısı
+
+Üçüncü adımda hesaplanan yeni taban (180), **o barda değil bir sonraki bardan
+itibaren** geçerli. Sebebi: bir barın yalnızca en yükseğini ve en düşüğünü
+biliyoruz, hangisinin önce olduğunu bilmiyoruz. Aynı barda hem zirveyi görüp
+hem tabana düştüğümüzü varsaymak, kendimize olmayan bir avantaj vermek olurdu.
+Aşağıdaki "bar içi varsayımlar" listesinin üçüncü maddesi bu.
+
 ### Bar içi varsayımlar (hepsi aleyhimize)
 
 - Aynı barda hem stop hem tepe görüldüyse önce stop olmuş sayılır.
@@ -146,6 +246,12 @@ sonuc = calistir(gunluk, k)
 |---|---|---|---|---|---|---|
 | günlük | **5.80** | 5.63 | 6 yılın 4'ü | 22 | ~4 | %84 |
 | saatlik | **6.29** | 5.61 | 6 yılın 5'i | 38 | ~7 | %88 |
+
+> **2026-09-19 düzeltmesi:** saatlik veride 09:00 mumu seans öncesi yarım
+> saati de içeriyormuş (emirlerimiz o saatte çalışmıyor). Yalnızca 09:30
+> sonrasıyla saatlik test **6.12** (baseline'ı yine 6 yılın 5'inde geçiyor),
+> sabit eşikle tüm dönem 9.90 → **9.70**. Kabul değişmiyor. Ayrıntı:
+> [REGISTRY.md §6.11](REGISTRY.md).
 
 **Ek bilgiler (2026-09-11, defterden, günlük):**
 

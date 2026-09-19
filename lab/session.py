@@ -17,6 +17,7 @@ from src.data.session import (  # noqa: F401
     EXCHANGE_TZ,
     FIRST_RTH_HOUR,
     LAST_RTH_HOUR,
+    acilis_mumu_duzelt,
     bars_per_day,
     exchange_hour,
     regular_hours,

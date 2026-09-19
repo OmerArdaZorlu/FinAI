@@ -107,6 +107,45 @@ Sistemin asıl işi kod yazmak değil, **hipotez deneyip elemektir**:
 Reddedilen hipotezler de kayıtta tutulur. Kaç hipotez denendiği bilinmezse,
 şans beceri sanılır.
 
+## Paper motorunu çalıştırmak (ENV-B)
+
+```bash
+pip install -r requirements.txt
+
+python -m src.engine.dongu --kuru     # emir göndermeden, saat başı tur (izlemek için)
+python -m src.engine.dongu            # Alpaca PAPER hesabına gerçek emir
+python -m src.engine.saglik           # sistem sağlam mı? (çıkış kodu 0/1)
+python -m src.engine.rapor            # backtest varsayımı vs gerçekleşme
+python -m src.arayuz                  # panel: http://127.0.0.1:8000
+python scripts/parite.py              # karar mantığı değişmedi mi? (9.9004 / 28 + parmak izi)
+```
+
+* Döngü her saatin **:20'sinde** (UTC) tur atar; işletim sistemi zamanlayıcısı
+  kullanmaz. Aynı anda ikinci bir döngü başlatılamaz (`data/dongu.pid`).
+* Arada, borsa açıkken **dakikada bir koruma bekçisi** çalışır: elimizdeki
+  hisse kadar taban (stop) emri borsada mı, değilse koyar/düzeltir. Kısmen
+  dolan alışın kalanını iptal eder. Her müdahale panelin **Uyarılar**
+  tablosuna düşer.
+* **Hisse bölünmesi:** depo günde bir kez son 60 günü baştan indirir;
+  fiyatlarda %25'ten büyük sıçrama görülürse hemen indirir ve düzelmezse
+  emir göndermez. Araştırma verisinin tamamı için bölünmeden sonra tüm
+  geçmiş yeniden indirilmeli:
+  `python scripts/fetch_bars.py --symbols AAPL --timeframe 1Hour --start 2016-01-01`
+  (bölünme sonrası `9.9004` parite değeri de değişebilir — önce veriye bak).
+* Günlük: `data/gunluk/motor.log` (UTF-8, 5 MB × 5 dosya).
+* E-posta alarmı ve panel komut anahtarı `.env`'de (`SMTP_*`, `ALARM_ALICI`,
+  `ARAYUZ_ANAHTARI`). Boşsa alarm yalnızca log'a yazar, komutlar yalnızca bu
+  makineden kabul edilir.
+
+**Panel komutları:** `/durum`, `/turlar`, `/gunluk`, `/uyarilar`, `/duraklat` (yeni alım
+durur, pozisyon ve koruyucu stop kalır), `/devam`, `/stop onayla` (tüm emirler
+iptal, **pozisyon piyasadan kapatılır**), `/sifirla onayla`.
+
+> **Panel yerel ağa açıktır** (`0.0.0.0`). Ortak wifi'da aynı ağdaki herkes
+> görebilir. Sunucuya (AWS vb.) taşındığında portu güvenlik grubunda
+> **kapalı** tut; erişim Tailscale ya da SSH tüneliyle. Yalnızca bu makine
+> için: `python -m src.arayuz --host 127.0.0.1`.
+
 ## Depo yapısı
 
 ```

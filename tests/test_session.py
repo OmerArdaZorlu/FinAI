@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.data.session import (  # noqa: E402
+    acilis_mumu_duzelt,
     bars_per_day,
     exchange_hour,
     regular_hours,
@@ -113,3 +114,32 @@ def test_report_flags_each_hour():
     assert report.loc[4, "seans"] == "uzatılmış"
     assert report.loc[11, "seans"] == "düzenli"
     assert report["hacim_payi"].sum() == pytest.approx(1.0)
+
+
+
+# ------------------------------------------------ 09:00 barının düzeltilmesi --
+
+def test_acilis_mumu_seans_oncesini_dislar():
+    """09:00-09:29 dakikalarında fiyat 90'a iniyor (seans öncesi); düzeltilmiş
+    09:00 barı bunu görmemeli, 09:30'daki açılışla başlamalı."""
+    ts = pd.date_range("2024-03-04 14:00", periods=60, freq="1min", tz="UTC")  # 09:00-09:59 NY
+    fiyat = [90.0 if i < 30 else 100.0 + i / 100 for i in range(60)]
+    dak = pd.DataFrame({"timestamp": ts, "open": fiyat, "high": fiyat, "low": fiyat,
+                        "close": fiyat, "volume": 10, "trade_count": 1, "vwap": fiyat})
+    saat = pd.DataFrame({"timestamp": pd.to_datetime(["2024-03-04 14:00", "2024-03-04 15:00"], utc=True),
+                         "open": [90.0, 101.0], "high": [100.59, 102.0], "low": [90.0, 100.5],
+                         "close": [100.59, 101.5], "volume": [600, 500], "trade_count": [60, 50],
+                         "vwap": [95.0, 101.0]})
+    d = acilis_mumu_duzelt(saat, dak)
+    ilk = d.iloc[0]
+    assert (ilk["open"], ilk["low"], ilk["close"]) == (100.30, 100.30, 100.59)
+    assert ilk["volume"] == 300
+    assert d.iloc[1].equals(saat.iloc[1])                   # 10:00 barına dokunulmaz
+
+
+def test_dakikasi_olmayan_gunun_acilis_mumu_aynen_kalir():
+    saat = hourly_bars(days=1)
+    dak = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume",
+                                "trade_count", "vwap"])
+    dak["timestamp"] = pd.to_datetime(dak["timestamp"], utc=True)
+    pd.testing.assert_frame_equal(acilis_mumu_duzelt(saat, dak), saat)

@@ -161,6 +161,11 @@ Hepsi SPY ve AAPL, 2016-01 → 2024-06, maliyet her alış ve satışta %0.05.
   | günlük | **5.80** | 5.63 | 6 yılın 4'ü |
   | saatlik | **6.29** | 5.61 | 6 yılın 5'i |
 
+  **2026-09-19 düzeltmesi (6.11):** saatlik veride 09:00 mumu seans öncesi
+  yarım saati de içeriyormuş. Yalnızca 09:30 sonrasıyla: saatlik test **6.12**
+  (baseline 5.63, yine 6 yılın 5'i), tüm dönem **9.70**. Kabul değişmiyor;
+  aşağıdaki tablolar düzeltme öncesi değerlerdir.
+
   Aynı eşikler sabit tutularak tüm dönem (2016 → 2024-06):
 
   | | 1 lira → | baseline | en büyük erime | baseline erime | piyasada | işlem |
@@ -266,7 +271,8 @@ Tüm döneme bakılarak sonucu görülen ayarlar. Eğitim/test içindeki seçiml
 | 2026-09-11 | Takip mesafesi tablosu (4 mesafe × 2 çizgi × 2 sembol) | 16 | geniş mesafede al-tut'a dönüşüyor |
 | 2026-09-11 | KABUL-1, zararına satış dip çizgisinde (günlük, saatlik) | 2 | KABUL-1'den kötü |
 | 2026-09-12 | KABUL-1, dakikalık veri | 1 | saatlikle neredeyse aynı |
-| | **Toplam** | **~74** | |
+| 2026-09-19 | KABUL-1 saatlik, 09:00 mumu seans öncesinden arındırıldı | 1 | biraz düştü, hâlâ baseline'ın üstünde |
+| | **Toplam** | **~75** | |
 
 **Bu sayının anlamı (ARCHITECTURE.md §7.4):** tamamen değersiz 50 strateji
 denendiğinde, aralarındaki en iyisi şans eseri iyi görünür. ~71 denemeden
@@ -537,3 +543,75 @@ iyi. Kendi baseline'ına göre fark en büyük dakikalıkta (+0.76), ama tek bir
 denemede ve çok küçük bir farkla. İşlem sayısı artmadı (22), yani maliyet
 sorunu yok. Erime baseline'dan biraz az, koruma hâlâ sınırlı. Saatlikten
 dakikalığa geçmek belirgin bir kazanç getirmedi.
+
+### 6.11 KABUL-1 saatlik, 09:00 mumu düzeltilmiş (2026-09-19)
+
+**Bulgu.** `src/data/session.py`'deki not "09:00 barı 09:30–10:00'ı kapsar"
+diyordu. Dakikalık veriyle ölçüldü (2023, 250 gün): **yanlış**. Alpaca
+saatlik barı seans öncesiyle birlikte topluyor; 09:00 barı 09:00–10:00.
+Barın açılışı her gün 09:00'daki seans öncesi fiyat; en düşüğü günlerin
+%44'ünde, en yükseği %19'unda seans öncesinden geliyor. Emirlerimiz seans
+öncesinde çalışmıyor; backtest ise o yarım saatteki fiyatla alış/satış
+sayabiliyordu. KABUL-1'in tüm dönemdeki 28 alışının 12'si bu barda.
+
+**Tek tek bakış (12 alış, dakikalık veriyle):** 7'si gerçekte de aynı
+fiyattan olurdu; 3'ü daha iyi fiyattan (borsa seviyenin altında açıldı, ör.
+2020-02-24: 71.65, backtest 72.67); 2'si o barda hiç olmazdı (2016-02-08,
+işlem +%14.2; 2018-11-02, işlem −%22.6 — seans öncesi 48.94'e indi, 09:30
+sonrası en düşük 49.23, seviye 49.16).
+
+**Deney.** 09:00 barı yalnızca 09:30–09:59 dakikalarından yeniden kuruldu
+(`src/data/session.py` → `acilis_mumu_duzelt()`), diğer barlar aynı. 2136
+günün hepsinde dakikalık veri var; kontrol: barın kapanışı %100 aynı kaldı,
+açılışı günlerin %96'sında, en düşüğü %26'sında değişti. Kurallar, eşik
+seçenekleri, eğitim/test, maliyet aynı. Önce orijinal veriyle 6.2852 ve
+9.9004 birebir yeniden üretildi.
+
+AAPL saatlik, 1 lira →:
+
+| | orijinal | 09:00 düzeltilmiş |
+|---|---|---|
+| **test yılları** (2019 → 2024-06) | **6.29** | **6.12** |
+| maliyet olmasa | 6.53 | 6.35 |
+| baseline (kesintisiz) | 5.63 | 5.63 |
+| baseline'ı geçtiği yıl | 6'da 5 | 6'da 5 |
+| işlem / zararına satılan | 38 / 19 | 38 / 19 |
+| en büyük erime, sistem | %30.5 | %30.5 |
+| **tüm dönem, sabit eşik** (2016 → 2024-06) | **9.90** | **9.70** |
+| baseline, tüm dönem | 9.13 | 9.13 |
+| işlem / ilk barda alış | 28 / 12 | 28 / 10 |
+| en büyük erime, tüm dönem | %38.3 | %39.4 |
+
+Baseline değişmiyor: başlangıç ve bitiş fiyatı barın kapanışından, kapanış
+düzeltmede değişmiyor.
+
+Yıl yıl (test):
+
+| yıl | orijinal | düzeltilmiş | baseline | seçilen stop (orij. → düz.) |
+|---|---|---|---|---|
+| 2019 | +106.6% | +101.7% | +88.4% | 2.0 → 0.5 |
+| 2020 | +89.4% | +90.6% | +82.2% | 2.0 → 2.0 |
+| 2021 | +21.1% | +18.5% | +34.7% | 0.25 → 0.5 |
+| 2022 | −21.4% | −21.0% | −26.5% | 0.25 → 0.25 |
+| 2023 | +49.6% | +50.5% | +48.9% | 0.25 → 0.5 |
+| 2024 (Haz) | +12.9% | +12.9% | +10.9% | 2.0 → 0.5 |
+
+Alım payı (0.10) ve takip (1.0) her yıl aynı seçildi.
+
+**Sonuç:** sistem biraz kötüleşti (test −0.17, tüm dönem −0.20) ama
+baseline'ı geçme durumu aynı: test 6'da 5, tüm dönem 9.70 > 9.13. KABUL-1
+aynen kalıyor. Dakikalık deney (6.10) zaten seans öncesini dışlıyordu ve 6.32
+vermişti — bu da düzeltilmiş saatlikle uyumlu.
+
+**Dikkat — eşik seçimi kırılgan:** düzeltilmiş veride eğitim, zararına satış
+için 6 yılın 4'ünde **0.5** seçiyor; orijinalde 2.0 ya da 0.25'ti. Son yıl
+(2024) seçimi 2.0 → 0.5 oldu. Motorun kullandığı `stop_payi=2.00` bu son
+yıl seçiminden geliyordu. Sonuç iki seçimde de benzer çıktığı için stop
+payının getiriye etkisi küçük; ama "eşik yenileme kuralı" kararı verilirken
+bu veri kullanılmalı.
+
+**Açık kalan:** canlı motor da Alpaca'nın saatlik barını kullanıyor, yani
+çizgileri seans öncesi uç fiyatları da görüyor. Backtest düzeltilmiş veriyle
+değerlendirilecekse motorun 09:00 barı da dakikalıktan kurulmalı (karar
+verilmedi). Günlük barların (5.80) seans öncesi içerip içermediği ayrıca
+kontrol edilmedi.

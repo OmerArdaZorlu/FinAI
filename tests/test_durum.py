@@ -7,6 +7,7 @@ etmeli. Zirve ve stop diske yazilmazsa koruma seviyesi kaybolur (TD-06).
 from __future__ import annotations
 
 import math
+from datetime import datetime, timedelta, timezone
 import sys
 from pathlib import Path
 
@@ -121,3 +122,27 @@ def test_arastirma_veritabanina_dokunulmaz():
     from src.data.db import DEFAULT_DB_PATH
     assert D.DEFAULT_PAPER_DB_PATH != DEFAULT_DB_PATH
     assert D.DEFAULT_PAPER_DB_PATH.name == "paper.db"
+
+
+# ---------------------------------------------------------------- UYARILAR --
+
+def test_ayni_uyari_kisa_surede_tekrar_edince_satir_acilmaz(tmp_path):
+    t0 = datetime(2026, 9, 18, 14, 0, tzinfo=timezone.utc)
+    with D.connect(tmp_path / "p.db") as c:
+        for dk in (0, 1, 2):
+            D.uyari_yaz(c, seviye=D.UYARI, anahtar="taban_yoktu", konu="taban yoktu",
+                        simdi=t0 + timedelta(minutes=dk))
+        (u,) = D.son_uyarilar(c)
+    assert u["tekrar"] == 3
+    assert u["ilk_utc"] == "2026-09-18T14:00:00+0000"
+    assert u["son_utc"] == "2026-09-18T14:02:00+0000"
+
+
+def test_uzun_sure_sonra_ya_da_farkli_konuda_yeni_satir(tmp_path):
+    t0 = datetime(2026, 9, 18, 14, 0, tzinfo=timezone.utc)
+    with D.connect(tmp_path / "p.db") as c:
+        D.uyari_yaz(c, seviye=D.KOTU, anahtar="a", konu="x", simdi=t0)
+        D.uyari_yaz(c, seviye=D.KOTU, anahtar="a", konu="x", simdi=t0 + timedelta(hours=7))
+        D.uyari_yaz(c, seviye=D.KOTU, anahtar="a", konu="y", simdi=t0 + timedelta(hours=7))
+        satirlar = D.son_uyarilar(c)
+    assert len(satirlar) == 3

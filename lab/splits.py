@@ -32,8 +32,8 @@ from typing import Iterator
 import pandas as pd
 
 # --- Sabit sınır. Değiştirmek bilinçli bir karardır ve git'te görünür. ---
-RESEARCH_END = "2024-06-30"   # araştırma alanının son günü (dahil)
-VAULT_BEGINS = "2024-07-01"   # kasa buradan başlar (dahil)
+# Tek kopyası src/data/kasa.py'de (arayüz de kasada durmak zorunda).
+from src.data.kasa import RESEARCH_END, VAULT_BEGINS  # noqa: E402,F401
 
 # Alt dönem tutarlılığı: etki her üçünde de görünmeli. Yalnızca birinde
 # varsa o rejime özgüdür, genel bir yasa değildir.

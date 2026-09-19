@@ -22,9 +22,15 @@ kullanmak yılda iki kez yanlış barlarla çalışmak demektir (TECH_DEBT.md TD
 
 Bilinen sınırlar
 ----------------
-* **09:00 barı aslında yarım saattir** (09:30–10:00). Süresi diğerlerinin yarısı
-  ama açılış oynak olduğu için aralığı benzer (1.74 vs 1.85). Dışlamak isterseniz
-  `include_open_bar=False`.
+* **09:00 barı açılış öncesini de taşır** (09:00–10:00). Bu notta eskiden
+  "09:30–10:00, yarım saat" yazıyordu — **yanlıştı** (2026-09-19, dakikalık
+  veriyle ölçüldü, 2023'ün 250 günü): Alpaca saatlik barı uzatılmış seansla
+  birlikte toplar. Barın açılışı her gün 09:00'daki seans öncesi fiyat; en
+  düşüğü günlerin %44'ünde, en yükseği %19'unda 09:00–09:29'dan geliyor.
+  Emirlerimiz seans öncesinde çalışmadığı için backtest orada gerçekleşmeyecek
+  alış/satış sayabilir. Düzeltme: `acilis_mumu_duzelt()` bu barı yalnızca
+  09:30–09:59 dakikalarından yeniden kurar (etkisi REGISTRY 6.11).
+  Tamamen dışlamak isterseniz `include_open_bar=False`.
 * **16:00 barı kapanış müzayedesini taşır** (hacmin %13'ü) ama uzatılmış seans
   işlemlerini de içerir. RTH içinde işlem yapıp kapanıştan önce çıkan bir
   strateji için son eyleme dönüştürülebilir bar 15:00 barıdır.
@@ -56,7 +62,8 @@ def regular_hours(df: pd.DataFrame, *, include_open_bar: bool = True) -> pd.Data
 
     Args:
         df: Kanonik bar tablosu, `timestamp` UTC tz-aware.
-        include_open_bar: 09:00 barı (09:30–10:00, yarım saat) dahil edilsin mi.
+        include_open_bar: 09:00 barı (seans öncesini de taşır, bkz. modül notu)
+            dahil edilsin mi.
 
     Returns:
         Filtrelenmiş tablo, indeks sıfırlanmış. Girdi zaten günlük barlardan
@@ -79,6 +86,39 @@ def regular_minutes(df: pd.DataFrame) -> pd.DataFrame:
     dakika = t.dt.hour * 60 + t.dt.minute
     mask = (dakika >= 9 * 60 + 30) & (dakika < 16 * 60)
     return df.loc[mask].reset_index(drop=True)
+
+
+def acilis_mumu_duzelt(saatlik: pd.DataFrame, dakikalik: pd.DataFrame) -> pd.DataFrame:
+    """Saatlik 09:00 barını yalnızca 09:30–09:59 dakikalarından yeniden kurar.
+
+    Alpaca'nın 09:00 barı seans öncesi yarım saati de içerir (modül notu).
+    Düzenli seansta işlem yapan bir sistemin backtest'i o yarım saati
+    görmemeli. Diğer barlara dokunulmaz. Dakikalık verisi olmayan günün 09:00
+    barı olduğu gibi kalır.
+
+    Args:
+        saatlik: `regular_hours` sonrası saatlik barlar.
+        dakikalik: Aynı sembolün 1Min barları (filtreli ya da filtresiz).
+    """
+    t = dakikalik["timestamp"].dt.tz_convert(EXCHANGE_TZ)
+    dakika = t.dt.hour * 60 + t.dt.minute
+    ilk = dakikalik.loc[(dakika >= 9 * 60 + 30) & (dakika < 10 * 60)].copy()
+    ilk["gun"] = t.loc[ilk.index].dt.date
+    ilk["pv"] = ilk["vwap"] * ilk["volume"]
+    g = ilk.groupby("gun").agg(
+        open=("open", "first"), high=("high", "max"), low=("low", "min"),
+        close=("close", "last"), volume=("volume", "sum"),
+        trade_count=("trade_count", "sum"), pv=("pv", "sum"))
+    g["vwap"] = g["pv"] / g["volume"]
+
+    out = saatlik.copy()
+    st = out["timestamp"].dt.tz_convert(EXCHANGE_TZ)
+    gun = st.dt.date
+    maske = (st.dt.hour == 9) & gun.isin(g.index)
+    for k in ("open", "high", "low", "close", "volume", "trade_count", "vwap"):
+        if k in out.columns:
+            out.loc[maske, k] = gun[maske].map(g[k]).to_numpy()
+    return out
 
 
 def session_report(df: pd.DataFrame) -> pd.DataFrame:

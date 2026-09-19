@@ -22,6 +22,10 @@ Tablolar
 * `emirler`        — gönderilen her emir, tekrarsız kimliğiyle.
 * `gerceklesmeler` — dolan emirler: istenen seviye ile gerçekleşen fiyat yan
                      yana. Paper koşusunun asıl çıktısı (TD-10, TD-11).
+* `turlar`         — döngünün her turu (kalp atışı). Sağlık kontrolü okur.
+* `alarmlar`       — aynı alarmın tekrar tekrar gitmesini önler.
+* `komutlar`       — arayüzden gelen /stop, /duraklat kütüğü.
+* `uyarilar`       — panelde görünen sorun listesi (koruma bekçisi, alarmlar).
 
 Zaman biçimi `src/data/db.py` ile aynıdır: ISO-8601 UTC metni.
 """
@@ -88,6 +92,8 @@ CREATE TABLE IF NOT EXISTS emirler (
                                             -- duruma yazilir.
     adet            INTEGER NOT NULL,
     durum           TEXT NOT NULL,          -- 'gonderildi' | 'dolu' | 'iptal' | 'red'
+                                            -- | 'degisti' (yerinde guncellendi,
+                                            -- yerine yeni kimlikli satir geldi)
     gonderildi_utc  TEXT NOT NULL,
     guncellendi_utc TEXT NOT NULL
 );
@@ -107,6 +113,54 @@ CREATE TABLE IF NOT EXISTS gerceklesmeler (
 );
 
 CREATE INDEX IF NOT EXISTS idx_gerc_emir ON gerceklesmeler (client_order_id);
+
+-- Kalp atisi: dongunun her turu, sonucu ne olursa olsun. sinyaller yetmiyor:
+-- borsa kapaliyken ve acil durdurmada oraya hic satir yazilmiyor, oysa saglik
+-- kontrolunun "motor en son ne zaman CALISTI" bilmesi gerek.
+CREATE TABLE IF NOT EXISTS turlar (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    baslangic_utc   TEXT NOT NULL,
+    bitis_utc       TEXT NOT NULL,
+    sonuc           TEXT NOT NULL,          -- 'tamam' | 'hata' | 'durduruldu'
+    ozet            TEXT,
+    hata            TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tur_zaman ON turlar (baslangic_utc);
+
+-- Alarm tekrar korumasi: ayni sorun her saat basi e-posta atmasin.
+CREATE TABLE IF NOT EXISTS alarmlar (
+    anahtar         TEXT PRIMARY KEY,       -- 'tur_hatasi', 'mutabakat', ...
+    son_gonderim    TEXT NOT NULL,
+    adet            INTEGER NOT NULL
+);
+
+-- Komut kutugu: arayuzden gelen /stop, /duraklat ... Arayuz buraya YAZMAZ;
+-- komutu bayrak dosyasiyla iletir, dongu bayragin durumu degisince buraya
+-- yazar (veritabanina tek yazar ilkesi).
+CREATE TABLE IF NOT EXISTS komutlar (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    zaman_utc       TEXT NOT NULL,
+    komut           TEXT NOT NULL,
+    kaynak          TEXT,
+    sonuc           TEXT
+);
+
+-- Panelde gorunen sorun listesi. Ayni anahtar kisa surede tekrar gelirse
+-- yeni satir acilmaz, tekrar sayaci artar (her saat ayni saglik sorunu
+-- tabloyu doldurmasin).
+CREATE TABLE IF NOT EXISTS uyarilar (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ilk_utc         TEXT NOT NULL,
+    son_utc         TEXT NOT NULL,
+    seviye          TEXT NOT NULL,          -- 'bilgi' | 'uyari' | 'kotu'
+    anahtar         TEXT NOT NULL,
+    konu            TEXT NOT NULL,
+    mesaj           TEXT,
+    tekrar          INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_uyari_anahtar ON uyarilar (anahtar, son_utc);
 """
 
 
@@ -289,6 +343,33 @@ def emir_durumu_guncelle(
     )
 
 
+def emir_ek_guncelle(
+    conn: sqlite3.Connection, client_order_id: str, *, ek_seviye: float, bar_zamani: str,
+) -> None:
+    """Borsadaki alış emri aynı kaldı ama bar değişti: dolunca kurulacak
+    zararına satış seviyesini son barın değerine çeker (backtest dolum barının
+    çizgisini kullanır)."""
+    conn.execute(
+        "UPDATE emirler SET ek_seviye = ?, bar_zamani = ?, guncellendi_utc = ? "
+        "WHERE client_order_id = ?",
+        (_sayi(ek_seviye), bar_zamani, simdi_utc(), client_order_id),
+    )
+
+
+def emir_var_mi(conn: sqlite3.Connection, client_order_id: str) -> bool:
+    """Bu kimlik daha önce kullanıldı mı (hangi durumda olursa olsun)."""
+    return conn.execute("SELECT 1 FROM emirler WHERE client_order_id = ?",
+                        (client_order_id,)).fetchone() is not None
+
+
+def bekleyenleri_kapat(conn: sqlite3.Connection, yeni_durum: str) -> None:
+    """Henüz akıbeti işlenmemiş tüm emirleri kapatır (acil durdurmada)."""
+    conn.execute(
+        "UPDATE emirler SET durum = ?, guncellendi_utc = ? WHERE durum = 'gonderildi'",
+        (yeni_durum, simdi_utc()),
+    )
+
+
 def bekleyen_emirler(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Henüz dolmamış ya da iptal edilmemiş emirler."""
     return conn.execute(
@@ -323,3 +404,129 @@ def gerceklesme_yaz(
         (client_order_id, bar_zamani, tip, float(istenen_seviye),
          float(gerceklesen_fiyat), int(adet), simdi_utc()),
     )
+
+
+# ------------------------------------------------------------------ TURLAR --
+
+def tur_yaz(
+    conn: sqlite3.Connection,
+    *,
+    baslangic_utc: str,
+    bitis_utc: str,
+    sonuc: str,
+    ozet: str = "",
+    hata: str = "",
+) -> None:
+    """Döngünün bir turunu kalp atışı olarak yazar. Yalnızca eklenir."""
+    conn.execute(
+        "INSERT INTO turlar (baslangic_utc, bitis_utc, sonuc, ozet, hata) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (baslangic_utc, bitis_utc, sonuc, ozet, hata),
+    )
+
+
+def son_tur(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """En son yazılan tur; hiç tur yoksa None."""
+    return conn.execute(
+        "SELECT * FROM turlar ORDER BY id DESC LIMIT 1").fetchone()
+
+
+def son_turlar(conn: sqlite3.Connection, adet: int = 50) -> list[sqlite3.Row]:
+    """En yeni turlar, yeniden eskiye."""
+    return conn.execute(
+        "SELECT * FROM turlar ORDER BY id DESC LIMIT ?", (int(adet),)).fetchall()
+
+
+# ---------------------------------------------------------------- ALARMLAR --
+
+def alarm_gonderildi_mi(
+    conn: sqlite3.Connection,
+    anahtar: str,
+    *,
+    sessizlik_saat: float,
+    simdi: datetime | None = None,
+) -> bool:
+    """Bu anahtar son `sessizlik_saat` içinde gönderildi mi?"""
+    satir = conn.execute(
+        "SELECT son_gonderim FROM alarmlar WHERE anahtar = ?", (anahtar,)).fetchone()
+    if satir is None:
+        return False
+    son = datetime.strptime(satir["son_gonderim"], "%Y-%m-%dT%H:%M:%S%z")
+    simdi = simdi or datetime.now(timezone.utc)
+    return (simdi - son).total_seconds() < sessizlik_saat * 3600
+
+
+def alarm_isaretle(
+    conn: sqlite3.Connection, anahtar: str, *, simdi: datetime | None = None,
+) -> None:
+    """Anahtarı 'şimdi gönderildi' diye işaretler, sayacı artırır."""
+    an = (simdi or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%S+0000")
+    conn.execute(
+        """
+        INSERT INTO alarmlar (anahtar, son_gonderim, adet) VALUES (?, ?, 1)
+        ON CONFLICT(anahtar) DO UPDATE SET
+            son_gonderim = excluded.son_gonderim, adet = alarmlar.adet + 1
+        """,
+        (anahtar, an),
+    )
+
+
+# ---------------------------------------------------------------- KOMUTLAR --
+
+def komut_yaz(
+    conn: sqlite3.Connection,
+    *,
+    komut: str,
+    kaynak: str = "",
+    sonuc: str = "",
+    zaman_utc: str | None = None,
+) -> None:
+    """Arayüzden gelen komutu kütüğe yazar (yazan döngüdür, arayüz değil)."""
+    conn.execute(
+        "INSERT INTO komutlar (zaman_utc, komut, kaynak, sonuc) VALUES (?, ?, ?, ?)",
+        (zaman_utc or simdi_utc(), komut, kaynak, sonuc),
+    )
+
+
+# ---------------------------------------------------------------- UYARILAR --
+
+BILGI, UYARI, KOTU = "bilgi", "uyari", "kotu"
+UYARI_BIRLESTIRME_SAAT = 6.0
+
+
+def uyari_yaz(
+    conn: sqlite3.Connection,
+    *,
+    seviye: str,
+    anahtar: str,
+    konu: str,
+    mesaj: str = "",
+    simdi: datetime | None = None,
+) -> None:
+    """Panelin uyarı tablosuna satır ekler.
+
+    Aynı anahtar ve konu son `UYARI_BIRLESTIRME_SAAT` içinde yazıldıysa yeni
+    satır açılmaz; o satırın tekrar sayısı ve son zamanı güncellenir.
+    """
+    an = (simdi or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%S+0000")
+    son = conn.execute(
+        "SELECT id, son_utc, konu FROM uyarilar WHERE anahtar = ? "
+        "ORDER BY id DESC LIMIT 1", (anahtar,)).fetchone()
+    if son is not None and son["konu"] == konu:
+        gecen = (datetime.strptime(an, "%Y-%m-%dT%H:%M:%S%z")
+                 - datetime.strptime(son["son_utc"], "%Y-%m-%dT%H:%M:%S%z"))
+        if gecen.total_seconds() < UYARI_BIRLESTIRME_SAAT * 3600:
+            conn.execute(
+                "UPDATE uyarilar SET son_utc = ?, tekrar = tekrar + 1, mesaj = ?, "
+                "seviye = ? WHERE id = ?", (an, mesaj, seviye, son["id"]))
+            return
+    conn.execute(
+        "INSERT INTO uyarilar (ilk_utc, son_utc, seviye, anahtar, konu, mesaj) "
+        "VALUES (?, ?, ?, ?, ?, ?)", (an, an, seviye, anahtar, konu, mesaj))
+
+
+def son_uyarilar(conn: sqlite3.Connection, adet: int = 20) -> list[sqlite3.Row]:
+    """En yeni uyarılar, yeniden eskiye."""
+    return conn.execute(
+        "SELECT * FROM uyarilar ORDER BY son_utc DESC, id DESC LIMIT ?",
+        (int(adet),)).fetchall()

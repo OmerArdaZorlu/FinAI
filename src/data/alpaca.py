@@ -39,6 +39,17 @@ class AlpacaError(RuntimeError):
     """Alpaca API çağrısı kurtarılamaz biçimde başarısız olduğunda."""
 
 
+class BosVeriError(AlpacaError):
+    """İstek başarılı ama aralıkta hiç bar yok.
+
+    Geçmiş veri indirirken bu bir hatadır: yanlış sembol ya da yanlış tarih
+    aralığı vermişizdir. Artımlı tazelemede ise NORMAL durumdur — hafta sonu,
+    tatil, ya da henüz yeni bar kapanmamış. `src/data/senkron.py` yalnızca bu
+    sınıfı yakalar; `AlpacaError` alt sınıfı olduğu için mevcut `except
+    AlpacaError` blokları davranış değiştirmez.
+    """
+
+
 @dataclass(frozen=True)
 class Credentials:
     key_id: str
@@ -172,7 +183,7 @@ def fetch_bars(
         params["page_token"] = token
 
     if not rows:
-        raise AlpacaError(
+        raise BosVeriError(
             f"[{symbol}] {start} — {end} aralığında hiç bar dönmedi. "
             "Sembol, tarih aralığı ve feed ayarını kontrol edin."
         )

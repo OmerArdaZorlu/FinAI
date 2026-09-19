@@ -16,9 +16,12 @@ anahtarları aynı yerde tutulmaz). Bilinçli bir canlı koşu için
 
 Emir tipleri ve neden böyle
 ---------------------------
-* **Alış — limit, `day`.** Seviye her bar değiştiği için emir bar sonunda
-  iptal edilip yenisi konur. Bekleyen emir borsada durduğundan motor uyurken
-  de dolar; 15 dakikalık veri gecikmesi gerçekleşmeyi etkilemez.
+* **Alış — limit, `day`.** Seviye değişirse emir **yerinde güncellenir**
+  (`emri_guncelle`, PATCH), değişmezse dokunulmaz. İptal + yeniden koymak
+  yarış doğurur: iptal anlık değildir, eski emrin tuttuğu nakit/hisse serbest
+  kalmadan gelen yeni emir "yetersiz" diye reddedilebilir. Bekleyen emir
+  borsada durduğundan motor uyurken de dolar; 15 dakikalık veri gecikmesi
+  gerçekleşmeyi etkilemez.
 * **Koruma — stop, `gtc`.** Pozisyon gece taşındığı için emir de gece
   yaşamalı. Tam hisse kullanmamızın sebebi bu: kesirli hissede Alpaca
   koruyucu emir tutamıyor ve stop bizim sürecimizde durmak zorunda kalıyor
@@ -48,6 +51,11 @@ TIMEOUT = 30
 # Emir tipleri — `durum.py`'deki `emirler.tip` sütunuyla aynı sözcükler
 LIMIT_AL = "limit_al"
 STOP_SAT = "stop_sat"
+
+# Bir daha değişmeyecek durumlar. Bunların dışındaki her şey (new, accepted,
+# partially_filled, pending_cancel, pending_replace, done_for_day ...) "emir
+# hâlâ canlı" demektir — dolan adet henüz kesin değildir.
+SON_HALLER = frozenset({"filled", "canceled", "expired", "replaced", "rejected"})
 
 
 class BrokerError(RuntimeError):
@@ -102,6 +110,16 @@ class Emir:
     def bekliyor(self) -> bool:
         return self.durum in ("new", "accepted", "pending_new", "partially_filled",
                               "accepted_for_bidding")
+
+    @property
+    def son_halde(self) -> bool:
+        """Emir bitti mi. Bittiyse `dolan_adet` kesindir — kısmen dolup iptal
+        edilen emrin dolan kısmı da gerçek hissedir."""
+        return self.durum in SON_HALLER
+
+    @property
+    def kismi(self) -> bool:
+        return self.durum == "partially_filled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,9 +193,11 @@ class Broker:
                 if yanit.status_code in (200, 204):
                     return yanit.json() if yanit.content else None
                 if yanit.status_code in (401, 403):
+                    # Alpaca 403'ü emir reddinde de kullanır (yetersiz alım
+                    # gücü, wash trade). Gövde sebebi söyler — yutulmasın.
                     raise BrokerError(
-                        f"Kimlik doğrulama reddedildi (HTTP {yanit.status_code}). "
-                        "Anahtarlar paper hesabına mı ait?"
+                        f"Kimlik doğrulama ya da emir reddedildi (HTTP {yanit.status_code}): "
+                        f"{yanit.text[:300]} — anahtarlar paper hesabına mı ait?"
                     )
                 if yanit.status_code == 404:
                     return None
@@ -283,6 +303,35 @@ class Broker:
 
     def _emir_gonder(self, govde: dict) -> Emir:
         return _emre_cevir(self._istek("POST", "/orders", json=govde))
+
+    def emri_guncelle(
+        self,
+        broker_id: str,
+        *,
+        client_order_id: str,
+        adet: int | None = None,
+        limit: float | None = None,
+        stop: float | None = None,
+    ) -> Emir:
+        """Bekleyen emri yerinde değiştirir (PATCH /v2/orders/{id}).
+
+        İptal + yeniden koymanın yerine. Eski emrin tuttuğu hisse ya da nakit
+        serbest kalmayı beklemez; "yetersiz adet / alım gücü" yarışı olmaz.
+        Alpaca eski emri `replaced` yapar, yeni `id`'li bir emir döner.
+        `client_order_id` yeni emrin kimliğidir ve tekrarsız olmalıdır —
+        verilmezse Alpaca rastgele verir ve emri izleyemeyiz.
+
+        Emir o sırada dolmuş ya da zaten değiştiriliyorsa broker 422 döner;
+        `BrokerError` yükselir, çağıran bir sonraki geçişte yeniden bakar.
+        """
+        govde: dict[str, str] = {"client_order_id": client_order_id}
+        if adet is not None:
+            govde["qty"] = str(int(adet))
+        if limit is not None:
+            govde["limit_price"] = f"{limit:.2f}"
+        if stop is not None:
+            govde["stop_price"] = f"{stop:.2f}"
+        return _emre_cevir(self._istek("PATCH", f"/orders/{broker_id}", json=govde))
 
     def emri_iptal(self, broker_id: str) -> None:
         """Tek emri iptal eder. Zaten dolmuşsa broker 422 döner — sessizce geçilir."""

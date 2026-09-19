@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KABUL-1 Paneli</title>
+<link rel="stylesheet" href="/static/stil.css">
+</head>
+<body>
+<div class="duzen">
+
+  <aside class="yan">
+    <section>
+      <h2>Hisseler</h2>
+      <ul id="hisseler" class="hisseler"></ul>
+    </section>
+
+    <section>
+      <h2>Aralık</h2>
+      <div id="araliklar" class="araliklar" role="radiogroup" aria-label="Zaman aralığı"></div>
+    </section>
+
+    <section>
+      <h2>Çizgiler</h2>
+      <div class="katman">
+        <div class="katman-baslik">
+          <label><input type="checkbox" data-katman="canli"> <strong>Canlı</strong></label>
+          <span class="stil-ornek duz" aria-hidden="true"></span>
+        </div>
+        <p class="aciklama">Motorun gerçekte gördüğü seviyeler ve gerçek işlemler.</p>
+        <div class="cizgi-secimleri" data-katman-listesi="canli"></div>
+        <p id="canli-not" class="not" hidden></p>
+      </div>
+      <div class="katman">
+        <div class="katman-baslik">
+          <label><input type="checkbox" data-katman="backtest"> <strong>Backtest</strong></label>
+          <span class="stil-ornek kesikli" aria-hidden="true"></span>
+        </div>
+        <p class="aciklama">Aynı kurallar geçmiş veride. <span id="bt-ozet"></span></p>
+        <div class="cizgi-secimleri" data-katman-listesi="backtest"></div>
+        <p id="backtest-not" class="not" hidden></p>
+      </div>
+    </section>
+  </aside>
+
+  <main class="ana">
+    <header class="baslik">
+      <div class="baslik-sol">
+        <h1 id="baslik-sembol">—</h1>
+        <span id="baslik-bar" class="ikincil"></span>
+      </div>
+      <div class="baslik-sag">
+        <span id="rozet-dongu" class="rozet"></span>
+        <span id="rozet-bayrak" class="rozet" hidden></span>
+        <button id="saglik-dugme" class="rozet dugme" type="button" title="Sağlık kontrolünü yenile">
+          <span class="isaret" aria-hidden="true"></span><span class="yazi">sağlık…</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="grafik-kutu">
+      <div id="deger-paneli" class="deger-paneli" aria-live="off"></div>
+      <div id="grafik" class="grafik" role="img" aria-label="Fiyat grafiği ve sistem çizgileri"></div>
+    </div>
+
+    <section class="uyarilar" aria-label="Uyarılar">
+      <div class="uyarilar-baslik">
+        <span>Uyarılar</span>
+        <span id="uyari-ozet" class="ikincil"></span>
+      </div>
+      <ul id="uyari-listesi" class="uyari-listesi"></ul>
+      <p id="uyari-bos" class="uyari-bos ikincil">Henüz uyarı yok.</p>
+    </section>
+
+    <section class="terminal" aria-label="Kontrol terminali">
+      <div class="terminal-baslik">
+        <span>Kontrol terminali</span>
+        <span class="ikincil">/yardim · ↑↓ geçmiş</span>
+      </div>
+      <pre id="terminal-cikti" class="terminal-cikti" tabindex="0"></pre>
+      <form id="terminal-form" class="terminal-satir" autocomplete="off">
+        <span class="istem" aria-hidden="true">&gt;</span>
+        <input id="terminal-girdi" type="text" spellcheck="false" autocapitalize="off"
+               placeholder="/durum" aria-label="Komut">
+      </form>
+    </section>
+  </main>
+</div>
+
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/uygulama.js"></script>
+</body>
+</html>
