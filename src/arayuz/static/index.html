@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -11,34 +11,21 @@
 
   <aside class="yan">
     <section>
-      <h2>Hisseler</h2>
-      <ul id="hisseler" class="hisseler"></ul>
-    </section>
-
-    <section>
-      <h2>Aralık</h2>
-      <div id="araliklar" class="araliklar" role="radiogroup" aria-label="Zaman aralığı"></div>
-    </section>
-
-    <section>
-      <h2>Çizgiler</h2>
+      <h2>Lines</h2>
       <div class="katman">
         <div class="katman-baslik">
-          <label><input type="checkbox" data-katman="canli"> <strong>Canlı</strong></label>
+          <label><input type="checkbox" data-katman="canli"> <strong>Live</strong></label>
           <span class="stil-ornek duz" aria-hidden="true"></span>
         </div>
-        <p class="aciklama">Motorun gerçekte gördüğü seviyeler ve gerçek işlemler.</p>
         <div class="cizgi-secimleri" data-katman-listesi="canli"></div>
-        <p id="canli-not" class="not" hidden></p>
       </div>
       <div class="katman">
         <div class="katman-baslik">
           <label><input type="checkbox" data-katman="backtest"> <strong>Backtest</strong></label>
           <span class="stil-ornek kesikli" aria-hidden="true"></span>
         </div>
-        <p class="aciklama">Aynı kurallar geçmiş veride. <span id="bt-ozet"></span></p>
+        <div id="bt-ozet" class="katman-ozet"></div>
         <div class="cizgi-secimleri" data-katman-listesi="backtest"></div>
-        <p id="backtest-not" class="not" hidden></p>
       </div>
     </section>
   </aside>
@@ -47,47 +34,114 @@
     <header class="baslik">
       <div class="baslik-sol">
         <h1 id="baslik-sembol">—</h1>
+        <span id="baslik-fiyat" class="baslik-fiyat"></span>
         <span id="baslik-bar" class="ikincil"></span>
       </div>
       <div class="baslik-sag">
         <span id="rozet-dongu" class="rozet"></span>
         <span id="rozet-bayrak" class="rozet" hidden></span>
-        <button id="saglik-dugme" class="rozet dugme" type="button" title="Sağlık kontrolünü yenile">
-          <span class="isaret" aria-hidden="true"></span><span class="yazi">sağlık…</span>
+        <button id="saglik-dugme" class="rozet dugme" type="button" title="Refresh health check">
+          <span class="isaret" aria-hidden="true"></span><span class="yazi">Health…</span>
         </button>
       </div>
     </header>
 
-    <div class="grafik-kutu">
-      <div id="deger-paneli" class="deger-paneli" aria-live="off"></div>
-      <div id="grafik" class="grafik" role="img" aria-label="Fiyat grafiği ve sistem çizgileri"></div>
+    <div class="grafik-arac">
+      <div id="tf-dugmeler" class="tf-dugmeler" role="radiogroup" aria-label="Bar interval"></div>
+      <div class="gosterge-menu">
+        <button id="gosterge-dugme" class="arac-dugme" type="button" aria-expanded="false">
+          <span aria-hidden="true">ƒx</span> Indicators
+        </button>
+        <div id="gosterge-panel" class="gosterge-panel" hidden></div>
+      </div>
     </div>
 
-    <section class="uyarilar" aria-label="Uyarılar">
-      <div class="uyarilar-baslik">
-        <span>Uyarılar</span>
+    <div class="grafik-kutu">
+      <div id="deger-paneli" class="deger-paneli" aria-live="off"></div>
+      <div id="grafik" class="grafik" role="img" aria-label="Price chart and system lines"></div>
+    </div>
+
+    <div id="alt-paneller" class="alt-paneller"></div>
+
+    <section class="kart" aria-labelledby="poz-baslik">
+      <div class="kart-baslik">
+        <h2 id="poz-baslik">Positions</h2>
+        <div class="filtreler">
+          <label class="secici"><span>Asset Class</span><select id="poz-sinif"></select></label>
+          <label class="secici"><span>Side</span>
+            <select id="poz-yon"><option>All</option><option>Long</option><option>Short</option></select></label>
+        </div>
+      </div>
+      <div class="tablo-kutu">
+        <table class="tablo">
+          <thead><tr>
+            <th>Asset</th><th>Asset Class</th><th>Side</th><th class="s">Qty</th><th class="s">Avg Entry</th>
+            <th class="s">Price</th><th class="s">Market Value</th><th class="s">Total P/L ($)</th><th class="s">Total P/L (%)</th>
+          </tr></thead>
+          <tbody id="poz-govde"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="kart" aria-labelledby="emir-baslik">
+      <div class="kart-baslik">
+        <h2 id="emir-baslik">Orders</h2>
+        <div class="filtreler">
+          <input id="emir-ara" class="arama" type="search" placeholder="Search…" aria-label="Search orders">
+          <label class="secici"><span>Status</span>
+            <select id="emir-durum"><option>All</option><option>Open</option><option>Filled</option><option>Canceled</option></select></label>
+          <label class="secici"><span>Side</span>
+            <select id="emir-yon"><option>All</option><option>Buy</option><option>Sell</option></select></label>
+        </div>
+      </div>
+      <div class="tablo-kutu">
+        <table class="tablo">
+          <thead><tr>
+            <th>Asset</th><th>Order Type</th><th>Side</th><th class="s">Qty</th><th class="s">Filled Qty</th>
+            <th class="s">Avg. Fill Price</th><th>Status</th><th>Submitted At</th>
+          </tr></thead>
+          <tbody id="emir-govde"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="kart uyarilar" aria-label="Alerts">
+      <div class="kart-baslik">
+        <h2>Alerts</h2>
         <span id="uyari-ozet" class="ikincil"></span>
       </div>
       <ul id="uyari-listesi" class="uyari-listesi"></ul>
-      <p id="uyari-bos" class="uyari-bos ikincil">Henüz uyarı yok.</p>
+      <p id="uyari-bos" class="bos">No alerts.</p>
     </section>
 
-    <section class="terminal" aria-label="Kontrol terminali">
+    <section class="terminal" aria-label="Console">
       <div class="terminal-baslik">
-        <span>Kontrol terminali</span>
-        <span class="ikincil">/yardim · ↑↓ geçmiş</span>
+        <span>Console</span>
+        <span class="ikincil">/help · ↑↓ history</span>
       </div>
       <pre id="terminal-cikti" class="terminal-cikti" tabindex="0"></pre>
       <form id="terminal-form" class="terminal-satir" autocomplete="off">
         <span class="istem" aria-hidden="true">&gt;</span>
         <input id="terminal-girdi" type="text" spellcheck="false" autocapitalize="off"
-               placeholder="/durum" aria-label="Komut">
+               placeholder="/status" aria-label="Command">
       </form>
     </section>
   </main>
+
+  <aside class="sag" aria-labelledby="izleme-baslik">
+    <section class="kart izleme">
+      <div class="kart-baslik"><h2 id="izleme-baslik">Watchlist</h2></div>
+      <div class="izleme-filtre">
+        <input id="izleme-ara" class="arama" type="search" placeholder="Search symbol…" aria-label="Search symbol">
+        <select id="izleme-sinif" aria-label="Asset Class"></select>
+      </div>
+      <div id="izleme-liste" class="izleme-liste"></div>
+    </section>
+  </aside>
 </div>
 
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/gosterge.js"></script>
 <script src="/static/uygulama.js"></script>
 </body>
 </html>

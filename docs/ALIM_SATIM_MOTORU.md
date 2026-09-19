@@ -1,7 +1,7 @@
 # Alım Satım Motoru — Not
 
 > **Durum:** 🟡 NOT — kenara alındı, henüz kod yok (2026-09-11)
-> **İlgili:** [ARCHITECTURE.md](ARCHITECTURE.md) §2, §3, §7, §8, §11 · [TECH_DEBT.md](TECH_DEBT.md) · [ENVIRONMENTS.md](ENVIRONMENTS.md) · [hypotheses/REGISTRY.md](../hypotheses/REGISTRY.md)
+> **İlgili:** [ARCHITECTURE.md](ARCHITECTURE.md) (bugünkü sistem) · [ARCHITECTURE_TASARIM.md](ARCHITECTURE_TASARIM.md) §2, §3, §7, §8, §11 (tasarım) · [TECH_DEBT.md](TECH_DEBT.md) · [ENVIRONMENTS.md](ENVIRONMENTS.md) · [hypotheses/REGISTRY.md](../hypotheses/REGISTRY.md)
 
 **Motor** = karar mekanizmalarından gelen sinyali alıp borsaya emir olarak
 gönderen, açık pozisyonları ve stopları takip eden, her şeyi kaydeden parça.
@@ -25,7 +25,7 @@ yapacağını geçmiş veride taklit ediyor, ama borsaya bağlanmıyor.
 
 ---
 
-## 2. Tasarımda ne yazıyor (ARCHITECTURE.md)
+## 2. Tasarımda ne yazıyor (ARCHITECTURE_TASARIM.md)
 
 ```text
  Alpaca canlı veri ──► son 100 bar (RAM) ──► features.py ──► model(ler)

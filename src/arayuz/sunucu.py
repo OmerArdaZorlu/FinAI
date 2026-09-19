@@ -5,11 +5,12 @@ komutları bayrak dosyasıyla iletir (bkz. `komut.py`).
 
 Güvenlik
 --------
-Görüntüleme (grafik, sağlık, günlük) anahtarsız. **Komut göndermek**
+Görüntüleme (grafik, sağlık, günlük, pozisyon ve emir tabloları) anahtarsız.
+Tablolar Alpaca'dan yalnızca OKUR (GET); panel emir göndermez. **Komut göndermek**
 `.env`'deki `ARAYUZ_ANAHTARI`'nı ister (`X-Arayuz-Anahtari` başlığı, sabit
 zamanlı karşılaştırma). Anahtar tanımlı değilse komutlar yalnızca bu
 makineden (127.0.0.1) kabul edilir. Aynı ağdaki başka bir cihaz izleyebilir
-ama `/stop` yazamaz.
+ama `/flatten` yazamaz.
 
 Sunucu AWS gibi bir yere taşınırsa portu güvenlik grubunda kapalı tut; erişim
 Tailscale ya da SSH tüneliyle. `0.0.0.0` orada doğrudan internet demektir.
@@ -23,9 +24,11 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -34,11 +37,20 @@ from src.data.kasa import VAULT_BEGINS
 from src.engine import gunluk
 from src.engine.motor import Ayarlar
 
-from . import komut, veri
+from . import komut, varlik, veri
 
 STATIK = Path(__file__).resolve().parent / "static"
+# Sayfa (uygulama.js) ile sunucunun anlaştığı veri biçiminin sürümü. Biri
+# değişip diğeri eski kalırsa (sunucu yeniden başlatılmadı) sayfa uyarır.
+ARAYUZ_SURUMU = 5
 YEREL = {"127.0.0.1", "::1", "localhost"}
 SAGLIK_ONBELLEK_SN = 20
+BROKER_ONBELLEK_SN = 10     # pozisyon / emir tabloları
+
+
+def _broker_ac():
+    from src.engine.broker import Broker
+    return Broker()
 
 
 @dataclass
@@ -46,6 +58,7 @@ class ArayuzAyar:
     motor: Ayarlar = field(default_factory=Ayarlar)
     anahtar: str | None = None
     gunluk_dosyasi: Path = gunluk.VARSAYILAN_DOSYA
+    broker_fn: Callable[[], Any] = _broker_ac     # testlerde sahte broker
 
     @classmethod
     def ortamdan(cls, dotenv_yolu: Path | str = ".env") -> "ArayuzAyar":
@@ -62,9 +75,27 @@ def uygulama(ayar: ArayuzAyar | None = None) -> FastAPI:
     m = ayar.motor
     app = FastAPI(title="KABUL-1 paneli", docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=STATIK), name="static")
+    # Araştırma döneminin mum + backtest verisi ~3 MB JSON; sıkıştırınca ~%10'u.
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     saglik_onbellek: dict = {"zaman": 0.0, "veri": None}
     saglik_kilidi = threading.Lock()
+    broker_onbellek: dict[str, tuple[float, dict]] = {}
+    broker_kilidi = threading.Lock()
+
+    def broker_tablosu(ad: str, cek: Callable[[Any], list[dict]]) -> dict:
+        """Alpaca'dan okunan tablo, 10 sn önbellekli. Ulaşılamazsa panel
+        çalışmaya devam eder: boş liste + hata metni."""
+        with broker_kilidi:
+            zaman, deger = broker_onbellek.get(ad, (0.0, None))
+            if deger is not None and time.time() - zaman < BROKER_ONBELLEK_SN:
+                return deger
+            try:
+                deger = {"satirlar": cek(ayar.broker_fn()), "hata": None}
+            except Exception as exc:   # ağ, anahtar, Alpaca hatası — hepsi aynı muamele
+                deger = {"satirlar": [], "hata": str(exc).splitlines()[0][:200]}
+            broker_onbellek[ad] = (time.time(), deger)
+            return deger
 
     def yetki(request: Request) -> str:
         """Komut yetkisi. Kaynağı (IP) döndürür — kütüğe yazılır."""
@@ -85,37 +116,63 @@ def uygulama(ayar: ArayuzAyar | None = None) -> FastAPI:
     @app.get("/api/yapilandirma")
     def yapilandirma():
         return {"motor_sembolu": m.sembol, "anahtar_gerekli": bool(ayar.anahtar),
-                "araliklar": veri.ARALIKLAR, "kasa_baslangici": VAULT_BEGINS}
+                "kasa_baslangici": VAULT_BEGINS, "siniflar": list(varlik.SINIFLAR),
+                "araliklar": list(veri.TF_LISTESI), "surum": ARAYUZ_SURUMU}
 
-    @app.get("/api/hisseler")
-    def hisseler():
-        return veri.hisseler(m.veri_db, m.paper_db, m.sembol)
+    @app.get("/api/izleme")
+    def izleme():
+        return veri.izleme(m.veri_db, m.sembol)
+
+    @app.get("/api/pozisyonlar")
+    def pozisyonlar():
+        return broker_tablosu("pozisyonlar", lambda b: veri.pozisyon_satirlari(b.pozisyonlar()))
+
+    @app.get("/api/emirler")
+    def emirler():
+        return broker_tablosu("emirler", lambda b: veri.emir_satirlari(b.emir_gecmisi()))
+
+    # Mumlar ve backtest zaman penceresiyle (grafik zamanı), sütunlu JSON bayt.
+    # `tf` bar aralığı: 1Min | 1Hour | 1Day (bkz. veri.TF_LISTESI).
+    @app.get("/api/kapsam")
+    def kapsam(sembol: str, tf: str | None = None):
+        try:
+            return veri.kapsam(m.veri_db, sembol, tf)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.get("/api/barlar")
-    def barlar(sembol: str, aralik: str = "60g"):
-        return veri.barlar(m.veri_db, sembol, _aralik(aralik))
+    def barlar(sembol: str, tf: str | None = None, bas: int | None = None,
+               bit: int | None = None, sonra: int | None = None):
+        try:
+            govde = veri.barlar(m.veri_db, sembol, tf=tf, bas=bas, bit=bit, sonra=sonra)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return Response(govde, media_type="application/json")
 
     @app.get("/api/katman/canli")
-    def canli(sembol: str, aralik: str = "60g"):
+    def canli(sembol: str):
         if sembol != m.sembol:
             return {"cizgiler": {a: [] for a in veri.CIZGILER}, "islemler": [],
                     "sinyal_sayisi": 0, "not": "motor bu sembolde işlem yapmıyor"}
-        return veri.canli_katman(m.paper_db, m.veri_db, sembol, _aralik(aralik))
+        return veri.canli_katman(m.paper_db, m.veri_db, sembol)
 
     @app.get("/api/katman/backtest")
-    def backtest(sembol: str, aralik: str = "60g"):
-        return veri.backtest_katmani(m.veri_db, sembol, _aralik(aralik))
+    def backtest(sembol: str, bas: int | None = None, bit: int | None = None):
+        return Response(veri.backtest_katmani(m.veri_db, sembol, bas=bas, bit=bit),
+                        media_type="application/json")
 
     @app.get("/api/ozet")
-    def ozet():
-        """Başlık çubuğu için ucuz özet — broker'a gitmez."""
+    def ozet(sembol: str | None = None):
+        """Başlık çubuğu için ucuz özet — broker'a gitmez. `sembol` verilirse
+        panelin "yeni bir şey var mı" işaretleri de döner (veri.isaretler)."""
         turlar = veri.son_turlar(m.paper_db, 1)
         kilit = m.kilit_dosyasi
         kilit_yasi = time.time() - kilit.stat().st_mtime if kilit.exists() else None
         return {"son_tur": turlar[0] if turlar else None,
                 "dongu_ayakta": kilit_yasi is not None and kilit_yasi < 120,
                 "dur": m.dur_dosyasi.exists(),
-                "duraklat": m.duraklat_dosyasi.exists()}
+                "duraklat": m.duraklat_dosyasi.exists(),
+                "isaretler": veri.isaretler(m.veri_db, m.paper_db, sembol) if sembol else None}
 
     @app.get("/api/saglik")
     def saglik_raporu(taze: bool = False):
@@ -148,6 +205,3 @@ def uygulama(ayar: ArayuzAyar | None = None) -> FastAPI:
 
     return app
 
-
-def _aralik(aralik: str) -> str:
-    return aralik if aralik in veri.ARALIKLAR else "60g"

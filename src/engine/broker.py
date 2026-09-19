@@ -258,6 +258,16 @@ class Broker:
         )
         return _emre_cevir(e) if e else None
 
+    # Panelin tabloları için ham liste (gösterim; motor kullanmaz).
+    def pozisyonlar(self) -> list[dict]:
+        """Hesaptaki tüm açık pozisyonlar, Alpaca'nın döndürdüğü haliyle."""
+        return self._istek("GET", "/positions") or []
+
+    def emir_gecmisi(self, durum: str = "all", adet: int = 200) -> list[dict]:
+        """Son emirler (yeniden eskiye), Alpaca'nın döndürdüğü haliyle."""
+        return self._istek("GET", "/orders", params={
+            "status": durum, "limit": adet, "direction": "desc"}) or []
+
     # ------------------------------------------------------------- emir --
 
     def limit_al(

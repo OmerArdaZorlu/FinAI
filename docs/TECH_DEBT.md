@@ -3,7 +3,7 @@
 > Mimari incelemesinde tespit edilen, **kapatılmadan üretime çıkılmaması gereken** açık maddeler.
 > Her madde: sabit ID · önem · hangi ortamda çözülür · sahip · tanım-of-done.
 > **Kural:** Bir madde ancak DoD'sindeki tüm kutular işaretlenince `✅ Kapalı` olur. Kısmen yapılan iş açıktır.
-> **Son güncelleme:** 2026-09-15 (paper motoru yazıldı — bkz. "Verilen Kararlar") · İlgili: [ARCHITECTURE.md](ARCHITECTURE.md), [ENVIRONMENTS.md](ENVIRONMENTS.md)
+> **Son güncelleme:** 2026-09-20 (panel ve gösterim verisi — bkz. "Verilen Kararlar — 2026-09-20") · İlgili: [ARCHITECTURE.md](ARCHITECTURE.md), [ENVIRONMENTS.md](ENVIRONMENTS.md)
 
 ---
 
@@ -85,6 +85,25 @@ Bunlar "yapılacak iş" değil, **verilmesi gereken tercihler**. Üçü de aşa�
 > **Kalan:** toplu (tek istekte çok sembol) çekim yazılmadı — `fetch_bars` tek
 > sembol alıyor, çoklu sembolle işlem gündeme geldiğinde yapılacak. Ölçülen
 > kazanç orada: 10 sembol 33.131 ms / 36 istek → 1.791 ms / 2 istek.
+
+---
+
+## Verilen Kararlar — 2026-09-20 (panel)
+
+| Konu | Karar | Gerekçe |
+|---|---|---|
+| Panelin kullanıcısı | **Bir yapay zekâ**; Alpaca'nın kendi ekranının yerine geçiyor | Durumu okuyup karar verebilmeli; Alpaca'nın ekranı buna uygun değil |
+| Arayüz dili | Arayüz metinleri ve terminal komutları **İngilizce borsa jargonu** (`/status`, `/flatten confirm`) | Emir dünyasının ortak dili; eski Türkçe adlar takma ad olarak duruyor |
+| Kural çizgileri | Yalnızca **1H** görünümünde | Kurallar saatlik hesaplanıyor; başka aralıkta hizaları yanlış olur |
+| Gösterim verisi | Dakikalık ve günlük seriler **turdan sonra**, ayrı modülde (`gosterim.py`) tazelenir | Karar yolu değişmesin; hatası turu ve hata sayacını etkilemiyor |
+| Dakikalık tam yenileme | **Kapalı** (saatlik/günlükte açık) | Pencere 11 yıl; her gün baştan indirmek milyonlarca barı boşuna çeker. Bölünmeyi saatlik seri yakalar, dakikalık elle yenilenir. |
+| Dakikalık veri saklama | **Tamamı saklanıyor**, budama yok | Kullanıcı kararı. Sembol başına ~2 milyon bar, ~100 MB. |
+| Pozisyon/emir tabloları | Alpaca'dan **salt-okur**, 10 sn önbellekli | Panel emir göndermez; Alpaca'ya ulaşılamazsa panel çalışmaya devam eder |
+| Mimari belgesi | Gerçeğe göre yeniden yazıldı; eski tasarım `ARCHITECTURE_TASARIM.md`'ye taşındı | Belge LEAN/XGBoost/Docker anlatıyordu, hiçbiri kurulmadı |
+
+**Açık kalan:** SPY dakikalık verisi inmedi (DNS hatası) · 09:00 seans öncesi
+düzeltmesinin motora girip girmeyeceği · panelin gerçek borsa saatinde
+denenmesi.
 
 ---
 
@@ -560,7 +579,7 @@ Sonucu şu: **süreç ölürse koruma da ölür.** Borsada sizi bekleyen hiçbir
 ### TD-20 — Orkestratör güvenilirlik katsayısı (`t`) sabit 1
 **Önem:** 🟡 P2 · **Ortam:** ENV-A · **Kapı:** G1 · **Durum:** ⬜ Açık
 
-**Sorun.** Orkestratörün birleştirme fonksiyonu (ARCHITECTURE.md §7.3):
+**Sorun.** Orkestratörün birleştirme fonksiyonu (ARCHITECTURE_TASARIM.md §7.3):
 
 ```text
 S = Σᵢ tᵢ·wᵢ / Σᵢ tᵢ

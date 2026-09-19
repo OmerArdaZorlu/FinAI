@@ -19,6 +19,14 @@ Güncel durum için önce `HANDOFF.md` (varsa), sonra `docs/TECH_DEBT.md`.
 - Emir gönderen tek yer `src/engine/broker.py`; yalnızca `paper-api.alpaca.markets`'e izin verir.
 - Ağa çıkıp bar deposunu güncelleyen tek yer `src/data/senkron.py`; `src/data/load.py` asla ağa çıkmaz.
 - Borsadaki emir **iptal + yeniden** değil, **yerinde güncellenir** (`emri_guncelle`); aynıysa dokunulmaz.
+- Panelin grafik verisini (1Min/1Day, izlenen semboller) döngü tur sonunda tazeler (`src/engine/gosterim.py`) — karar yolunun dışında, hatası turu etkilemez.
+
+## Panel (`src/arayuz/`)
+
+- **Asıl kullanıcısı bir yapay zekâ**: Alpaca'nın kendi ekranının yerine geçiyor. Ölçüt: "bir yapay zekâ bunu okuyup karar verebilir mi".
+- Arayüz metinleri ve terminal komutları **İngilizce borsa jargonu** (`/status`, `/runs`, `/alerts`, `/pause`, `/flatten confirm`, `/unhalt confirm`); eski Türkçe adlar takma ad. Kullanıcıyla konuşma dili yine Türkçe.
+- Sayfa ile sunucu `ARAYUZ_SURUMU` üzerinden anlaşır. **Sunucu kodu değişince paneli yeniden başlat** — eski süreç iki kez saat kaybettirdi.
+- Kural çizgileri (tepe/dip/alış/stop) yalnızca **1H** görünümünde; kurallar saatlik hesaplanıyor.
 
 ## Araştırma disiplini
 
@@ -42,6 +50,7 @@ python -m src.engine.dongu [--kuru]    # saat başı tur + dakikalık koruma bek
 python -m src.engine.saglik            # sağlık kontrolü (çıkış 0/1)
 python -m src.engine.rapor             # backtest varsayımı vs gerçekleşme
 python -m src.arayuz                   # panel http://127.0.0.1:8000
+python -m src.engine.gosterim          # panelin 1m/1D verisi (döngü zaten her turda yapar)
 ```
 
 ## Ortam tuzakları (Windows)

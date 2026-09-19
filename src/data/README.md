@@ -19,7 +19,7 @@ yeniden deneme mantıkları farklıdır.
 Ama ikisi de `schema.py`'ye uyar ve ikisi de `bars` tablosuna yazar. Canlı bar
 geçmiş bardan farklı bir şekle girerse model, eğitildiğinden başka sayılar görür
 ve canlı davranış backtest'e benzemez — `features.py` için geçerli "tek kaynak"
-kuralının (ARCHITECTURE.md §6) veri katmanındaki karşılığı budur.
+kuralının (ARCHITECTURE_TASARIM.md §6) veri katmanındaki karşılığı budur.
 
 ## Depo şeması — `data/market_data.db`
 
@@ -62,7 +62,7 @@ available_series()   # DB'de ne var: sembol, frekans, düzeltme, bar sayısı, a
 load_ingest_log()    # indirme geçmişi
 ```
 
-CSV gerekirse (Excel/Sheets ile QC için, ARCHITECTURE.md §5 adım 4):
+CSV gerekirse (Excel/Sheets ile QC için, ARCHITECTURE_TASARIM.md §5 adım 4):
 
 ```bash
 python scripts/fetch_bars.py --symbols SPY --csv-dir data/export
@@ -85,4 +85,4 @@ CSV **türetilmiş çıktıdır**; kaynak-doğru (source of truth) her zaman ver
   Yarım bar, `high`/`low`'u henüz belli olmadığı için sızıntının en sinsi türüdür.
 - **Doğrulama yazmadan önce koşar** — NaN, sıra bozukluğu, `high < low` gibi
   ihlallerde satır diske hiç ulaşmaz. Sessizce temizlenen veri, fark edilmeyen
-  veridir (ARCHITECTURE.md §6, Kural 5).
+  veridir (ARCHITECTURE_TASARIM.md §6, Kural 5).

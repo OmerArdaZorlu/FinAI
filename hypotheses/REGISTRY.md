@@ -1,7 +1,7 @@
 # Hipotez ve Kabul Kaydı
 
 Bu dosya projenin **hafızasıdır**: ne varsaydık, neyi test ettik, ne çıktı.
-ARCHITECTURE.md §7.4'teki deneme sayacı da burasıdır.
+ARCHITECTURE_TASARIM.md §7.4'teki deneme sayacı da burasıdır.
 
 **Değişmez kural: hiçbir kayıt silinmez.** Reddedilen hipotezler, başarısız
 denemeler ve tüm sonuçlar kalır. Kaç deneme yaptığımızı bilmek, kalan
@@ -232,7 +232,7 @@ Hepsi SPY ve AAPL, 2016-01 → 2024-06, maliyet her alış ve satışta %0.05.
     5.02 = üst yönetici ayrılığı, 1.01 = önemli anlaşma.
   - **Form 4:** şirket yöneticilerinin kendi hisselerini alıp satması.
   - **10-Q / 10-K:** çeyreklik ve yıllık raporlar.
-- **Mimaride yeri:** ARCHITECTURE.md §7.1'deki ikinci model. Hedefi (kısa
+- **Mimaride yeri:** ARCHITECTURE_TASARIM.md §7.1'deki ikinci model. Hedefi (kısa
   vade) fiyat sisteminden farklı olduğu için ayrı model olur (§7.2), ikisi
   orkestratörde birleşir (§7.3).
 - **Tip notu:** EDGAR'a şirketler açıklama yapar. SPY gibi endeks fonlarının
@@ -274,7 +274,7 @@ Tüm döneme bakılarak sonucu görülen ayarlar. Eğitim/test içindeki seçiml
 | 2026-09-19 | KABUL-1 saatlik, 09:00 mumu seans öncesinden arındırıldı | 1 | biraz düştü, hâlâ baseline'ın üstünde |
 | | **Toplam** | **~75** | |
 
-**Bu sayının anlamı (ARCHITECTURE.md §7.4):** tamamen değersiz 50 strateji
+**Bu sayının anlamı (ARCHITECTURE_TASARIM.md §7.4):** tamamen değersiz 50 strateji
 denendiğinde, aralarındaki en iyisi şans eseri iyi görünür. ~71 denemeden
 sonra al-tut'u küçük farkla geçen bir sonuç, ek kanıt olmadan "çalışıyor"
 sayılmaz.

@@ -60,7 +60,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import alarm, gunluk, saglik
+from . import alarm, gosterim, gunluk, saglik
 from . import durum as D
 from .motor import Ayarlar, TurSonucu, bir_tur, koruma_turu
 
@@ -256,6 +256,20 @@ def _bildirimler(ayarlar: Ayarlar, sonuc: str, ozet: str) -> None:
         log.error("bildirimler çalışmadı: %s", exc)
 
 
+def _gosterim(ayarlar: Ayarlar, gosterim_fn: Callable[[Ayarlar], object] | None) -> None:
+    """Panelin gösterdiği seriler (dakikalık, günlük, izlenen semboller).
+
+    Karar yolunun dışında: hatası loglanır, turu ve ardışık hata sayacını
+    etkilemez. Grafiğin eksik kalması işlem durdurmaz.
+    """
+    if gosterim_fn is None:
+        return
+    try:
+        gosterim_fn(ayarlar)
+    except Exception as exc:
+        gunluk.al().error("gösterim verisi tazelenemedi: %s", exc)
+
+
 def dongu(
     ayarlar: Ayarlar | None = None,
     *,
@@ -263,6 +277,7 @@ def dongu(
     tetik_dakika: int = 20,
     azami_ardisik_hata: int = 3,
     tur_fn: TurFn = bir_tur,
+    gosterim_fn: Callable[[Ayarlar], object] | None = gosterim.tazele,
     koruma_fn: TurFn | None = koruma_turu,
     koruma_aralik_sn: float = KORUMA_ARALIK_SN,
     simdi_fn: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc),
@@ -314,6 +329,7 @@ def dongu(
                 ardisik = 0
                 if bildir:
                     _bildirimler(ayarlar, sonuc, ozet)
+                _gosterim(ayarlar, gosterim_fn)
             except Exception as exc:
                 ardisik += 1
                 if bildir:

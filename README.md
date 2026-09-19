@@ -1,84 +1,85 @@
 # FinAI
 
-**Hisse senedi piyasaları için uçtan uca algoritmik al-sat sistemi.**
+**Hisse senedi piyasaları için kural tabanlı algoritmik al-sat sistemi.**
 
-Makine öğrenmesi tabanlı sinyal üretimi, kural bazlı risk yönetimi ve otomatik emir
-yürütmeyi tek bir canlı boru hattında birleştiren, kurumsal standartta bir araştırma
-ve üretim projesi.
+Bugün çalışan sistem: AAPL'in saatlik barlarında son 140 barın en yükseği ve
+en düşüğünden bir kanal çıkarır, dibin biraz üstünde alır, takip eden stopla
+çıkar. Emirler Alpaca **paper** hesabına gider. Model yok, kurallar sabit ve
+elle yazılmış — makine öğrenmesi katmanı ileride eklenecek (bkz.
+[docs/ARCHITECTURE_TASARIM.md](docs/ARCHITECTURE_TASARIM.md)).
 
-Başlangıç enstrümanları: `AAPL` (işlem) · `SPY` (karşılaştırma endeksi)
+Enstrümanlar: `AAPL` (işlem) · `SPY` (karşılaştırma endeksi)
 
 > Bkz. [DISCLAIMER.md](DISCLAIMER.md)
 
 
 ## Sistem ne yapıyor
 
-Piyasa açıkken sistem şu döngüyü tekrarlar:
+Döngü her saatin :20'sinde bir tur atar:
 
 ```
-   Alpaca (borsa verisi)
+   Alpaca (geçmiş barlar, 15 dk gecikmeli)
             │
             ▼
    ┌─────────────────┐
-   │  1. VERİ ALMA   │   AAPL ve SPY barları aynı zaman damgasında senkronize edilir
+   │  1. VERİ        │   Depo kaldığı yerden tazelenir, seans dışı barlar elenir
    └────────┬────────┘
             ▼
    ┌─────────────────┐
-   │  2. DÖNÜŞTÜRME  │   Ham fiyatlar → durağan, normalize 6 sayı
-   └────────┬────────┘   (features.py — eğitimde ve canlıda BİREBİR aynı kod)
-            ▼
-   ┌─────────────────┐
-   │  3. TAHMİN      │   XGBoost modeli → "yükselme olasılığı %68"
+   │  2. ÇİZGİ       │   Son 140 barın en yükseği (tepe) ve en düşüğü (dip)
    └────────┬────────┘
             ▼
    ┌─────────────────┐
-   │  4. RİSK        │   %1 sermaye riski · pozisyon boyutu · trailing stop
+   │  3. KARAR       │   kural.py: alış = dip + %10 × genişlik
+   └────────┬────────┘              stop = dip − 2 × genişlik
+            ▼                       tepeye değince takip eden stop
+   ┌─────────────────┐
+   │  4. EMİR        │   Aynıysa dokunma · değiştiyse yerinde güncelle (PATCH)
    └────────┬────────┘
             ▼
    ┌─────────────────┐
-   │  5. EMİR        │   Alpaca REST API üzerinden alım/satım
-   └────────┬────────┘
-            ▼
-   ┌─────────────────┐
-   │  6. KAYIT       │   Her bar, sinyal ve emir SQLite'a yazılır (append-only)
+   │  5. KAYIT       │   Sinyal, emir, tur ve uyarılar SQLite'a yazılır
    └─────────────────┘
 ```
 
+Turlar arasında **dakikada bir koruma bekçisi**: elimizdeki hisse kadar stop
+emri borsada duruyor mu, yoksa koyar.
+
 ### Temel tasarım ilkesi
 
-> **`features.py` tek kaynaktır.**
-> Model eğitilirken de canlı çalışırken de aynı fonksiyon çağrılır. İki ayrı hesap
-> yolu yoktur. Bu, algoritmik sistemlerin en sık ve en sinsi hatası olan
-> *train/serve skew*'i (eğitim ile canlının farklı sayılarla çalışması) yapısal
-> olarak engeller.
+> **Kuralların tek kopyası `src/engine/kural.py`'dedir.**
+> Backtest de canlı motor da aynı fonksiyonu çağırır; iki ayrı hesap yolu
+> yoktur. Bu, algoritmik sistemlerin en sinsi hatası olan *train/serve skew*'i
+> (geçmişte test edilen ile canlıda çalışanın farklı olması) yapısal olarak
+> engeller. `python scripts/parite.py` her değişiklikten sonra bunu doğrular.
 
 ---
 
-## Teknoloji yığını
+## Teknoloji
 
-| Katman | Seçim |
+| Katman | Kullanılan |
 |---|---|
-| Dil & kütüphaneler | Python · Pandas · NumPy · XGBoost |
-| Motor | QuantConnect LEAN |
-| Broker & veri | Alpaca Markets (WebSocket veri + REST emir) |
-| Kalıcılık | SQLite (append-only, indeksli) |
-| Dağıtım | AWS EC2 (Ubuntu) · Docker · Docker Compose |
-| CI/CD | GitHub Actions (pytest, sızıntı denetimi, NaN kontrolü, model doğrulama) |
+| Dil & kütüphaneler | Python 3.11 · Pandas · NumPy · requests |
+| Veri | Alpaca Market Data REST — ücretsiz SIP, 15 dakika gecikmeli |
+| Emir | Alpaca Trading REST — yalnızca **paper** adresi |
+| Kalıcılık | SQLite (append-only, indeksli): barlar + motor kütüğü |
+| Panel | FastAPI + lightweight-charts (salt-okur izleme arayüzü) |
+| Test | pytest — 297 test, ağa çıkmaz |
+| Çalıştırma | Yerel makine; döngü kendi saatini izler (cron yok) |
 
 ## Üç ortam
 
-Kod her üç ortamda **aynıdır**; değişen yalnızca konfigürasyon, sır ve yetkidir.
+Kod her ortamda **aynıdır**; değişen yalnızca konfigürasyon, sır ve yetkidir.
 
 | | **LOCAL-RESEARCH** | **LOCAL-BETA** | **AWS-PROD** |
 |---|---|---|---|
-| Rol | Hipotez, eğitim, backtest | Gerçek veriyle prova | Yalnızca koşturma |
-| Veri | Geçmiş | Canlı | Canlı |
+| Rol | Hipotez, backtest | Gerçek veriyle prova | Yalnızca koşturma |
 | Emir | Yok | Kâğıt üstü (paper) | **Gerçek** |
 | Sermaye | — | Sanal | **Gerçek** |
-| Model eğitimi | ✅ Tek yer burası |
+| Durum | ✅ var | ✅ var | ❌ kurulmadı |
 
-> **Değişmez kural:** AWS'de model eğitilmez, kod düzenlenmez, deney yapılmaz.
-> Üretime yalnızca etiketli, beta'da kanıtlanmış ve geri alınabilir bir imaj girer.
+> **Değişmez kural:** üretimde kod düzenlenmez, deney yapılmaz. Oraya yalnızca
+> etiketli, beta'da kanıtlanmış ve geri alınabilir bir sürüm girer.
 
 Detay ve terfi kapıları: [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md)
 
@@ -89,23 +90,22 @@ Detay ve terfi kapıları: [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md)
 Sistemin asıl işi kod yazmak değil, **hipotez deneyip elemektir**:
 
 ```
-   hipotez yazar          "Endeksten geri kalan hisse toparlar"
+   hipotez yazar          "Kanal dibinde al, takip eden stopla çık"
           ↓
-    formüle döker                rel_ret_5 = AAPL 5g getiri − SPY 5g getiri
+    kurala döker                 alış = dip + %10 × (tepe − dip)
           ↓
- Yeni sütun eklenir               features.py
+ Araştırma verisinde test        lab/backtest.py · 2016-01 → 2024-06
           ↓
- Model yeniden eğitilir           python -m src.train
+ Kabul kriteri karşılandı mı?    (kriter SONUCA BAKMADAN ÖNCE yazılır)
+          ├── hayır → kayda geç, bırak
+          └── evet  → hypotheses/ altına kabul belgesi + motora taşı
           ↓
- Kabul kriteri karşılandı mı?     (kriter SONUCA BAKMADAN ÖNCE yazılır)
-          ├── hayır → sütunu çıkar, kayda geç
-          └── evet  → sütun kalır, kayda geç
-          ↓
-      QC yapar               drawdown, kayıp serileri, aykırı değerler
+      Kayıt               hypotheses/REGISTRY.md — deneme sayacı dahil
 ```
 
 Reddedilen hipotezler de kayıtta tutulur. Kaç hipotez denendiği bilinmezse,
-şans beceri sanılır.
+şans beceri sanılır. **Kasa** (2024-07-01 sonrası) hiç bakılmamış sınav
+verisidir; açma kararı verilmedi.
 
 ## Paper motorunu çalıştırmak (ENV-B)
 
@@ -117,6 +117,7 @@ python -m src.engine.dongu            # Alpaca PAPER hesabına gerçek emir
 python -m src.engine.saglik           # sistem sağlam mı? (çıkış kodu 0/1)
 python -m src.engine.rapor            # backtest varsayımı vs gerçekleşme
 python -m src.arayuz                  # panel: http://127.0.0.1:8000
+python -m src.engine.gosterim         # panelin grafik verisi (1m/1D) — döngü zaten her turda yapar
 python scripts/parite.py              # karar mantığı değişmedi mi? (9.9004 / 28 + parmak izi)
 ```
 
@@ -132,14 +133,21 @@ python scripts/parite.py              # karar mantığı değişmedi mi? (9.9004
   geçmiş yeniden indirilmeli:
   `python scripts/fetch_bars.py --symbols AAPL --timeframe 1Hour --start 2016-01-01`
   (bölünme sonrası `9.9004` parite değeri de değişebilir — önce veriye bak).
+* **Panelin grafiği:** 1m / 1H / 1D bar aralığı, Indicators menüsünden SMA,
+  EMA, Bollinger (fiyatın üstüne) ve Volume, RSI, MACD, AO (altta ayrı
+  panelde). Tepe/dip/alış çizgileri yalnızca **1H**'de görünür — kurallar
+  saatlik hesaplanıyor. Dakikalık ve günlük veriyi döngü her tur sonunda
+  tazeler (`src/engine/gosterim.py`), karar yolunun dışında. Ücretsiz SIP
+  15 dakika gecikmeli olduğu için en yeni mum ~16 dakika geridedir.
 * Günlük: `data/gunluk/motor.log` (UTF-8, 5 MB × 5 dosya).
 * E-posta alarmı ve panel komut anahtarı `.env`'de (`SMTP_*`, `ALARM_ALICI`,
   `ARAYUZ_ANAHTARI`). Boşsa alarm yalnızca log'a yazar, komutlar yalnızca bu
   makineden kabul edilir.
 
-**Panel komutları:** `/durum`, `/turlar`, `/gunluk`, `/uyarilar`, `/duraklat` (yeni alım
-durur, pozisyon ve koruyucu stop kalır), `/devam`, `/stop onayla` (tüm emirler
-iptal, **pozisyon piyasadan kapatılır**), `/sifirla onayla`.
+**Panel komutları** (borsa jargonuyla İngilizce; eski Türkçe adlar takma ad
+olarak çalışır): `/status`, `/runs`, `/log`, `/alerts`, `/pause` (yeni alım
+durur, pozisyon ve koruyucu stop kalır), `/resume`, `/flatten confirm` (tüm
+emirler iptal, **pozisyon piyasadan kapatılır**), `/unhalt confirm`.
 
 > **Panel yerel ağa açıktır** (`0.0.0.0`). Ortak wifi'da aynı ağdaki herkes
 > görebilir. Sunucuya (AWS vb.) taşındığında portu güvenlik grubunda
@@ -149,16 +157,18 @@ iptal, **pozisyon piyasadan kapatılır**), `/sifirla onayla`.
 ## Depo yapısı
 
 ```
-FinAI/
-├── docs/               Mimari, ortam ayrımı, teknik borç kayıt defteri
-├── notebooks/          Hipotez testleri (kişi başına ayrı dosya)
-├── hypotheses/         Hipotez metinleri ve kabul kriterleri
-├── LICENSE             Tüm hakları saklı
-└── DISCLAIMER.md       Sorumluluk reddi
+trading_project/
+├── src/
+│   ├── data/        bar indirme ve depo (ağa çıkan tek yer: senkron.py)
+│   ├── engine/      kural · backtest · broker · motor · döngü · sağlık · alarm
+│   └── arayuz/      izleme paneli (salt-okur, emir göndermez)
+├── lab/             araştırma defterleri ve backtest
+├── hypotheses/      deney kayıt defteri, kabul edilen sistem
+├── scripts/         veri indirme, parite kontrolü, görsel üretimi
+├── tests/           297 test
+├── docs/            mimari, ortam ayrımı, teknik borç
+└── data/            veritabanları, günlükler, bayrak dosyaları (repoda değil)
 ```
-
-Üretim kodu (`features.py`, `train.py`, LEAN yapılandırması, Dockerfile) erişimi
-kısıtlı ayrı bir depoda tutulacaktır.
 
 ---
 
@@ -166,7 +176,8 @@ kısıtlı ayrı bir depoda tutulacaktır.
 
 | Doküman | İçerik |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Sistem mimarisi, dizin hiyerarşisi, veri akışı, feature sözleşmesi |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **Bugünkü sistem:** dizin haritası, bir turun akışı, değişmez kurallar, panel |
+| [docs/ARCHITECTURE_TASARIM.md](docs/ARCHITECTURE_TASARIM.md) | Kod yazılmadan önceki hedef mimari (model, konteyner, bulut — kurulmadı) |
 | [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md) | Üç ortam, terfi kapıları (G1/G2), sürüm & deploy akışı, sır yönetimi |
 | [docs/TECH_DEBT.md](docs/TECH_DEBT.md) | 19 maddelik teknik borç kayıt defteri + açık kararlar |
 
@@ -178,9 +189,12 @@ Koda başlamadan verilmesi gereken tercihler:
 
 | # | Karar | Durum |
 |---|---|---|
-| **AK-1** | Bar frekansı — günlük mü, saatlik mi? |
-| **AK-2** | Broker — Alpaca mı, Interactive Brokers mı? |
-| **AK-3** | Veri feed'i — IEX mi, 15 dk gecikmeli SIP mi, ücretli anlık mı? |
+| **AK-1** | Bar frekansı — günlük mü, saatlik mi? | ✅ Saatlik |
+| **AK-2** | Broker | ✅ Alpaca |
+| **AK-3** | Veri feed'i | ✅ 15 dk gecikmeli SIP |
+| — | Kasa (2024-07 →) açılsın mı | ⏳ verilmedi |
+| — | Paper koşusunun bitiş kriteri | ⏳ verilmedi |
+| — | Gerçek paraya geçiş (ENV-C) | ⏳ verilmedi |
 
 Ayrıntı ve etkileri: [docs/TECH_DEBT.md](docs/TECH_DEBT.md#açık-kararlar-borç-değil--verilmemiş-kararlar)
 

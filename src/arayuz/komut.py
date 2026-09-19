@@ -5,8 +5,12 @@ Arayüz broker'a emir göndermez ve veritabanına yazmaz. Etkili komutlar
 işler ve `komutlar` tablosuna yazar. `data/DUR` mekanizması zaten motorda
 vardı ve testliydi — arayüz aynı kanalı kullanır.
 
-Geri alınamaz komut onay ister: `/stop` pozisyonu piyasadan kapatır, bu yüzden
-`/stop onayla` yazılmadan hiçbir şey yapmaz.
+Geri alınamaz komut onay ister: `/flatten` pozisyonu piyasadan kapatır, bu
+yüzden `/flatten confirm` yazılmadan hiçbir şey yapmaz.
+
+İsimler ve çıktılar borsa jargonuyla İngilizce; panelin asıl kullanıcısı bir
+yapay zekâ ve emir dünyasının ortak dili bu (`flatten`, `halt`, `fill`).
+Eski Türkçe adlar takma ad olarak çalışmaya devam eder (`TAKMA_ADLAR`).
 """
 
 from __future__ import annotations
@@ -21,8 +25,21 @@ from src.engine.motor import Ayarlar
 
 from . import veri
 
-ONAY = "onayla"
-SEVIYE_ADI = {"bilgi": "bilgi", "uyari": "UYARI", "kotu": "KÖTÜ"}
+ONAY = ("confirm", "onayla")
+SEVIYE_ADI = {"bilgi": "info", "uyari": "WARN", "kotu": "CRIT"}
+
+# Eski Türkçe adlar ve kısayollar → komut.
+TAKMA_ADLAR = {
+    "/yardim": "/help", "/yardım": "/help", "/?": "/help",
+    "/durum": "/status",
+    "/turlar": "/runs",
+    "/gunluk": "/log", "/günlük": "/log",
+    "/uyarilar": "/alerts", "/uyarılar": "/alerts",
+    "/duraklat": "/pause",
+    "/devam": "/resume",
+    "/stop": "/flatten", "/halt": "/flatten",
+    "/sifirla": "/unhalt", "/sıfırla": "/unhalt", "/reset": "/unhalt",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,19 +50,19 @@ class Sonuc:
 
 
 YARDIM = """\
-Komutlar:
-  /durum              sağlık kontrolleri (son tur, broker, mutabakat, stop...)
-  /turlar [n]         son n tur (varsayılan 10)
-  /gunluk [n]         motor günlüğünün son n satırı (varsayılan 30)
-  /uyarilar [n]       son n uyarı: taban konuldu/düzeltildi, kısmi dolum,
-                      mutabakat, fiyat sıçraması... (varsayılan 10)
-  /duraklat           yeni ALIM yok, bekleyen alış iptal. Pozisyona DOKUNMAZ,
-                      koruyucu stop çalışmaya devam eder.
-  /devam              duraklatmayı kaldırır
-  /stop onayla        ACİL DURDURMA: tüm emirler iptal, pozisyon PİYASADAN
-                      KAPATILIR. Döngü 5 sn içinde uygular.
-  /sifirla onayla     acil durdurmayı kaldırır (motor yeniden işlem yapar)
-  /yardim             bu liste"""
+Commands:
+  /status             health checks (last run, broker, reconciliation, stop...)
+  /runs [n]           last n engine runs (default 10)
+  /log [n]            last n lines of the engine log (default 30)
+  /alerts [n]         last n alerts: stop placed/repaired, partial fill,
+                      reconciliation, price gap... (default 10)
+  /pause              no new ENTRIES, working buy order canceled. Position is
+                      NOT touched, the protective stop stays live.
+  /resume             lifts the pause
+  /flatten confirm    KILL SWITCH: cancel all orders, close the position AT
+                      MARKET. Engine applies it within 5 s.
+  /unhalt confirm     lifts the kill switch (engine trades again)
+  /help               this list"""
 
 
 def _bayrak_yaz(yol: Path, metin: str, kaynak: str) -> None:
@@ -71,79 +88,81 @@ def calistir(metin: str, ayarlar: Ayarlar, *, kaynak: str = "",
     komut, args = parcalar[0].lower(), parcalar[1:]
     if not komut.startswith("/"):
         komut = "/" + komut
+    komut = TAKMA_ADLAR.get(komut, komut)
+    onayli = args[:1] and args[0].lower() in ONAY
     log.info("komut (%s): %s", kaynak or "?", metin.strip())
 
     try:
-        if komut in ("/yardim", "/yardım", "/help", "/?"):
+        if komut == "/help":
             return Sonuc(YARDIM)
 
-        if komut == "/durum":
+        if komut == "/status":
             from src.engine import saglik
             sonuclar = saglik.kontroller(ayarlar)
             return Sonuc(saglik.metin_rapor(sonuclar), saglik.saglam_mi(sonuclar))
 
-        if komut == "/turlar":
+        if komut == "/runs":
             turlar = veri.son_turlar(ayarlar.paper_db, _sayi(args, 10, 200))
             if not turlar:
-                return Sonuc("Hiç tur yok — döngü hiç çalışmamış.", False)
+                return Sonuc("No runs yet — the engine has never run.", False)
             return Sonuc("\n".join(
                 f"{t['baslangic_utc'][:16].replace('T', ' ')}  {t['sonuc']:<10} "
                 f"{(t['hata'] or t['ozet'] or '').splitlines()[0] if (t['hata'] or t['ozet']) else ''}"[:160]
                 for t in turlar))
 
-        if komut in ("/uyarilar", "/uyarılar"):
+        if komut == "/alerts":
             uyarilar = veri.son_uyarilar(ayarlar.paper_db, _sayi(args, 10, 200))
             if not uyarilar:
-                return Sonuc("Hiç uyarı yok.")
+                return Sonuc("No alerts.")
             return Sonuc("\n".join(
                 f"{u['son_utc'][:16].replace('T', ' ')} UTC  "
                 f"{SEVIYE_ADI.get(u['seviye'], u['seviye']):<6} {u['konu']}"
                 + (f"  (×{u['tekrar']})" if u["tekrar"] > 1 else "")
                 for u in uyarilar), not any(u["seviye"] == "kotu" for u in uyarilar))
 
-        if komut == "/gunluk":
+        if komut == "/log":
             satirlar = gunluk.son_satirlar(gunluk_dosyasi, _sayi(args, 30, 500))
-            return Sonuc("\n".join(satirlar) or "Günlük boş.")
+            return Sonuc("\n".join(satirlar) or "Log is empty.")
 
-        if komut == "/duraklat":
+        if komut == "/pause":
             if ayarlar.duraklat_dosyasi.exists():
-                return Sonuc("Zaten duraklatılmış.")
+                return Sonuc("Already paused.")
             _bayrak_yaz(ayarlar.duraklat_dosyasi, metin.strip(), kaynak)
-            return Sonuc("DURAKLATILDI. Yeni alım yapılmayacak, bekleyen alış emri bir "
-                         "sonraki turda iptal edilecek. Pozisyon varsa koruma sürüyor.\n"
-                         "Geri almak için: /devam", tehlikeli=True)
+            return Sonuc("PAUSED. No new entries; the working buy order is canceled on the "
+                         "next run. An open position keeps its protective stop.\n"
+                         "To lift: /resume", tehlikeli=True)
 
-        if komut == "/devam":
+        if komut == "/resume":
             if not ayarlar.duraklat_dosyasi.exists():
-                return Sonuc("Duraklatma yok zaten.")
+                return Sonuc("Not paused.")
             ayarlar.duraklat_dosyasi.unlink()
-            return Sonuc("Duraklatma kaldırıldı. Bir sonraki turda alış emri yeniden konur.")
+            return Sonuc("Pause lifted. The entry order goes back on the next run.")
 
-        if komut == "/stop":
-            if args[:1] != [ONAY]:
-                return Sonuc("⚠ /stop tüm emirleri iptal eder ve pozisyonu PİYASA FİYATINDAN "
-                             "KAPATIR. Geri alınamaz.\n"
-                             "Yalnızca yeni alımı durdurmak istiyorsan: /duraklat\n"
-                             "Emin isen yaz: /stop onayla", False, tehlikeli=True)
+        if komut == "/flatten":
+            if not onayli:
+                return Sonuc("⚠ /flatten cancels every order and closes the position AT "
+                             "MARKET. It cannot be undone.\n"
+                             "To stop new entries only: /pause\n"
+                             "If you are sure: /flatten confirm", False, tehlikeli=True)
             if ayarlar.dur_dosyasi.exists():
-                return Sonuc("Acil durdurma zaten etkin.", tehlikeli=True)
+                return Sonuc("Kill switch already active.", tehlikeli=True)
             _bayrak_yaz(ayarlar.dur_dosyasi, metin.strip(), kaynak)
-            log.warning("ACİL DURDURMA istendi (%s)", kaynak or "?")
-            return Sonuc("ACİL DURDURMA bayrağı kondu. Döngü 5 saniye içinde emirleri iptal "
-                         "edip pozisyonu kapatacak. Durumu izle: /durum\n"
-                         "Yeniden başlatmak için: /sifirla onayla", tehlikeli=True)
+            log.warning("KILL SWITCH istendi (%s)", kaynak or "?")
+            return Sonuc("KILL SWITCH armed. Within 5 s the engine cancels all orders and "
+                         "closes the position. Watch it: /status\n"
+                         "To restart trading: /unhalt confirm", tehlikeli=True)
 
-        if komut == "/sifirla":
+        if komut == "/unhalt":
             if not ayarlar.dur_dosyasi.exists():
-                return Sonuc("Acil durdurma yok zaten.")
-            if args[:1] != [ONAY]:
-                return Sonuc("Acil durdurma kaldırılırsa motor bir sonraki turda yeniden "
-                             "işlem yapmaya başlar.\nEmin isen yaz: /sifirla onayla",
+                return Sonuc("Kill switch is not active.")
+            if not onayli:
+                return Sonuc("Lifting the kill switch lets the engine trade again on the "
+                             "next run.\nIf you are sure: /unhalt confirm",
                              False, tehlikeli=True)
             ayarlar.dur_dosyasi.unlink()
-            return Sonuc("Acil durdurma kaldırıldı. Motor bir sonraki turda normal çalışır.")
+            return Sonuc("Kill switch lifted. The engine runs normally from the next run.")
 
-        return Sonuc(f"Bilinmeyen komut: {komut}\n\n{YARDIM}", False)
+        return Sonuc(f"Unknown command: {komut}\n\n{YARDIM}", False)
     except Exception as exc:
         log.error("komut hatası (%s): %s", metin, exc)
-        return Sonuc(f"Komut çalışmadı: {exc}", False)
+        return Sonuc(f"Command failed: {exc}", False)

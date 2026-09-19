@@ -74,6 +74,7 @@ def alarm_kaydedici(monkeypatch):
 
 def calistir(ayarlar, saat, tur, **kw):
     kw.setdefault("koruma_fn", None)          # bekçi ayrı testlerde
+    kw.setdefault("gosterim_fn", None)        # gösterim verisi ağa çıkar, ayrı testlerde
     return DG.dongu(ayarlar, tur_fn=tur, simdi_fn=saat.simdi, uyu_fn=saat.uyu,
                     bildir=kw.pop("bildir", False), sinyal_yakala=False, **kw)
 
@@ -104,6 +105,25 @@ def test_turlar_her_saatin_20sinde(ayarlar):
     tur = SahteTur(saat)
     assert calistir(ayarlar, saat, tur, azami_tur=3) == 0
     assert [t.strftime("%H:%M") for t in tur.zamanlar] == ["14:05", "14:20", "15:20"]
+
+
+def test_gosterim_verisi_tur_sonrasi_tazelenir(ayarlar):
+    saat = Saat(dt.datetime(2026, 9, 18, 14, 5, tzinfo=UTC))
+    cagri = []
+    calistir(ayarlar, saat, SahteTur(saat), azami_tur=2,
+             gosterim_fn=lambda a: cagri.append(a.sembol))
+    assert cagri == ["AAPL", "AAPL"]
+
+
+def test_gosterim_hatasi_turu_etkilemez(ayarlar):
+    """Grafik verisi inemezse işlem durmaz: tur 'tamam' kalır, sayaç artmaz."""
+    saat = Saat(dt.datetime(2026, 9, 18, 14, 5, tzinfo=UTC))
+
+    def patla(_ayarlar):
+        raise RuntimeError("Alpaca 403")
+
+    assert calistir(ayarlar, saat, SahteTur(saat), azami_tur=4, gosterim_fn=patla) == 0
+    assert [t["sonuc"] for t in turlar(ayarlar)] == ["tamam"] * 4
 
 
 # -------------------------------------------------------------- HATA TAVRI --
